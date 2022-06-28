@@ -585,35 +585,6 @@ plot_paths_DepIntensity_dict = {
 # --- physionet
 param_list_physio = []
 physio_models_path = "{}saved_models_PhysioNet/".format(data_path)
-for _nn in [((50, 'tanh'),), ((200, 'tanh'), (200, 'tanh')), ]:
-    param_dict_physio_1 = {
-        'epochs': [175],
-        'batch_size': [50],
-        'save_every': [1],
-        'learning_rate': [0.001],
-        'test_size': [0.2],
-        'seed': [398],
-        'hidden_size': [50, 100],
-        'bias': [True],
-        'dropout_rate': [0.1],
-        'ode_nn': [_nn],
-        'readout_nn': [_nn],
-        'enc_nn': [_nn],
-        'use_rnn': [True,],
-        'solver': ["euler"],
-        'weight': [0.5],
-        'weight_decay': [1.],
-        'input_sig': [False, True],
-        'level': [2],
-        'dataset': ["physionet"],
-        'dataset_id': [None],
-        'which_loss': ['easy'],
-        'quantization': [0.016],
-        'n_samples': [8000],
-        'saved_models_path': [physio_models_path],
-    }
-    param_list_physio += get_parameter_array(param_dict=param_dict_physio_1)
-
 _nn = ((50, 'tanh'),)
 param_dict_physio_2 = {
     'epochs': [175],
@@ -640,8 +611,8 @@ param_dict_physio_2 = {
     'n_samples': [8000],
     'saved_models_path': [physio_models_path],
 }
-param_list_physio += get_parameter_array(param_dict=param_dict_physio_2)*4
-param_list_physio2 = get_parameter_array(param_dict=param_dict_physio_2)*4
+param_list_physio += get_parameter_array(param_dict=param_dict_physio_2)*5
+param_list_physio2 = get_parameter_array(param_dict=param_dict_physio_2)*5
 
 overview_dict_physio = dict(
     ids_from=1, ids_to=len(param_list_physio),
