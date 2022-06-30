@@ -1,11 +1,11 @@
 # Path-Dependent Neural Jump ODEs
 
 This repository is the official implementation of the paper
-[Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](TODO) which is the second part of the paper
+[Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) which is the second part of the paper
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
 
 The code is based on the [code of the first paper](https://github.com/HerreraKrachTeichmann/NJODE), 
-but was developed further such that it is more user friendly. 
+but was developed further such that it is more user-friendly. 
 All experiments from the first part can be run with this repo as well (see 
 [Instructions for NJODE](#instructions-for-running-experiments-of-neural-jump-ordinary-differential-equations)).
 
@@ -147,8 +147,32 @@ python run.py --params=param_list_climate --NB_JOBS=8 --NB_CPUS=1 --first_id=1 -
 This code can be used in accordance with the [LICENSE](LICENSE).
 
 If you find this code useful or include parts of it in your own work, 
-please cite our paper: [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](TODO).
+please cite our papers:  
 
+[Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284)
+
+```
+@article{PDNJODE
+  url = {https://arxiv.org/abs/2206.14284},
+  author = {Krach, Florian and Nübel, Marc and Teichmann, Josef},
+  title = {Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs},
+  publisher = {arXiv},
+  year = {2022},
+}
+```
+
+[Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR)
+
+```
+@inproceedings{
+herrera2021neural,
+title={Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering},
+author={Calypso Herrera and Florian Krach and Josef Teichmann},
+booktitle={International Conference on Learning Representations},
+year={2021},
+url={https://openreview.net/forum?id=JFKR3WqwyXR}
+}
+```
 
 
 ## Acknowledgements and References
