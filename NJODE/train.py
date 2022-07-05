@@ -90,7 +90,7 @@ def train(
 
 
     """
-    training function for controlled ODE-RNN model (models.NJODE),
+    training function for NJODE model (models.NJODE),
     the model is automatically saved in the model-save-path with the given
     model id, also all evaluations of the model are saved there
 
