@@ -13,7 +13,6 @@ import copy, os
 from fbm import fbm, fgn  # import fractional brownian motion package
 
 
-
 # ==============================================================================
 # CLASSES
 class StockModel:

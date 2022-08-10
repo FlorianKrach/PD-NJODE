@@ -1,7 +1,7 @@
 """
 author: Florian Krach & Calypso Herrera
 
-code for aall additional things, like plotting, getting overviews etc.
+code for all additional things, like plotting, getting overviews etc.
 """
 
 
@@ -18,6 +18,7 @@ from absl import flags
 
 import config
 import train
+from train_switcher import train_switcher
 
 try:
     from telegram_notifications import send_bot_message as SBM
@@ -360,14 +361,18 @@ def get_training_overview(
 
 def plot_paths_from_checkpoint(
         saved_models_path=config.saved_models_path, send=SEND,
-        model_ids=(1,), which='best', paths_to_plot=(0,), **options
+        model_ids=(1,), which='best', paths_to_plot=(0,), LOB_plot_errors=False,
+        **options
 ):
     """
     function to plot paths (using plot_one_path_with_pred) from a saved model
     checkpoint
     :param model_ids: list of int, the ids of the models to load and plot
     :param which: one of {'best', 'last', 'both'}, which checkpoint to load
-    :param paths_to_plot: list of int, see train.train.py
+    :param paths_to_plot: list of int, see train.train.py, set to None, if only
+        LOB_plot_errors should be executed
+    :param LOB_plot_errors: bool, whether to plot the error distribution for
+        LOB model
     :param options: feed directly to train
     :return:
     """
@@ -391,15 +396,19 @@ def plot_paths_from_checkpoint(
             params_dict['paths_to_plot'] = paths_to_plot
             params_dict['parallel'] = True
             params_dict['saved_models_path'] = saved_models_path
+            if LOB_plot_errors:
+                params_dict['plot_errors'] = True
+                if paths_to_plot is None:
+                    params_dict['plot_only'] = False
             for key in options:
                 params_dict[key] = options[key]
 
             if which in ['best', 'both']:
                 params_dict['load_best'] = True
-                train.train(send=send, **params_dict)
+                train_switcher(send=send, **params_dict)
             if which in ['last', 'both']:
                 params_dict['load_best'] = False
-                train.train(send=send, **params_dict)
+                train_switcher(send=send, **params_dict)
 
 
 def plot_loss_and_metric(

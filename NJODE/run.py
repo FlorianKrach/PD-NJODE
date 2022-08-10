@@ -24,6 +24,9 @@ import data_utils
 import train
 import climate_train
 import physionet_train
+import LOB_train
+import retrain_LOB_classifier
+from train_switcher import train_switcher
 
 try:
     from telegram_notifications import send_bot_message as SBM
@@ -89,31 +92,6 @@ print('SERVER={}'.format(SERVER))
 
 # =====================================================================================================================
 # Functions
-def train_switcher(**params):
-    """
-    function to call the correct train function depending on the dataset. s.t.
-    parallel training easily works altough different fuctions need to be called
-    :param params: all params needed by the train function, as passed by
-            parallel_training
-    :return: function call to the correct train function
-    """
-    if 'dataset' not in params:
-        raise KeyError('the "dataset" needs to be specified')
-    elif params['dataset'] in [
-        "BlackScholes", "Heston", "OrnsteinUhlenbeck", "HestonWOFeller",
-        "PoissonPointProcess", "FBM", "BM2DCorr", "BMandVar", "BM",
-        "sine_BlackScholes", "sine_Heston", "sine_OrnsteinUhlenbeck",
-        "SP500",] or \
-            'combined' in params['dataset'] or 'FBM[' in params['dataset']:
-        return train.train(**params)
-    elif params['dataset'] in ['climate', 'Climate']:
-        return climate_train.train(**params)
-    elif params['dataset'] in ['physionet', 'Physionet']:
-        return physionet_train.train(**params)
-    else:
-        raise ValueError('the specified "dataset" is not supported')
-
-
 def get_parameter_array(param_dict):
     """
     helper function to get a list of parameter-list with all combinations of

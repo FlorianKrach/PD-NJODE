@@ -1,7 +1,5 @@
 """
-author: Florian Krach & Calypso Herrera
-
-implementation of the training (and evaluation) of NJ-ODE
+author: Florian Krach
 """
 
 # =====================================================================================================================
@@ -21,12 +19,12 @@ import matplotlib  # plots
 import matplotlib.colors
 from torch.backends import cudnn
 import gc
+import sklearn
 
 import config
 import models
 import data_utils
 sys.path.append("../")
-import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
 
 try:
     from telegram_notifications import send_bot_message as SBM
@@ -59,8 +57,9 @@ data_path = config.data_path
 saved_models_path = config.saved_models_path
 flagfile = config.flagfile
 
-METR_COLUMNS: List[str] = ['epoch', 'train_time', 'eval_time', 'train_loss', 'eval_loss',
-                           'optimal_eval_loss']
+METR_COLUMNS = ['epoch', 'train_time', 'eval_time', 'train_loss',
+                'eval_loss', 'mse_eval_loss', 'classification_eval_loss']
+
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
 default_enc_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -82,9 +81,10 @@ def train(
         hidden_size=10, bias=True, dropout_rate=0.1,
         ode_nn=default_ode_nn, readout_nn=default_readout_nn,
         enc_nn=default_enc_nn, use_rnn=False,
+        output_midprice_only=True, use_eval_on_train=True,
+        classifier_nn=None,
         solver="euler", weight=0.5, weight_decay=1.,
-        dataset='BlackScholes', dataset_id=None, data_dict=None,
-        plot=True, paths_to_plot=(0,),
+        dataset_id=None, data_dict=None, plot=True, paths_to_plot=(0,),
         saved_models_path=saved_models_path,
         **options
 ):
@@ -115,6 +115,11 @@ def train(
             evaluation)
     :param seed: int, seed for the random splitting of the dataset into train
             and test
+    :param output_midprice_only: bool, whether the model output is only the
+            midprice or the same as the input
+    :param use_eval_on_train: bool, whether to use the eval parts on the train
+            dataset for training (=> filtering type of framework)
+    :param classifier_nn: None or network dict (as ode_nn)
     :param hidden_size: see models.NJODE
     :param bias: see models.NJODE
     :param dropout_rate: float
@@ -125,9 +130,6 @@ def train(
     :param solver: see models.NJODE
     :param weight: see models.NJODE
     :param weight_decay: see models.NJODE
-    :param dataset: str, which dataset to use, supported: {'BlackScholes',
-            'Heston', 'OrnsteinUhlenbeck'}. The corresponding dataset already
-            needs to exist (create it first using data_utils.create_dataset)
     :param dataset_id: int or None, the id of the dataset to be used, if None,
             the latest generated dataset of the given name will be used
     :param data_dict: None, str or dict, if not None, the inputs dataset and
@@ -140,32 +142,24 @@ def train(
             plotted
     :param saved_models_path: str, where to save the models
     :param options: kwargs, used keywords:
-            'func_appl_X'   list of functions (as str, see data_utils)
-                            to apply to X
-            'masked'        bool, whether the data is masked (i.e. has
-                            incomplete observations)
+            'plot_only'     bool, whether to only plot from model instead of
+                            training it
+            'plot_errors'   bool, whether to only plot errors from model
             'save_extras'   bool, dict of options for saving the plots
-            'plot_variance' bool, whether to plot also variance
-            'std_factor'    float, the factor by which the std is multiplied
             'parallel'      bool, used by parallel_train.parallel_training
             'resume_training'   bool, used by parallel_train.parallel_training
-            'plot_only'     bool, whether the model is used only to plot after
-                            initiating or loading (i.e. no training) and exit
-                            afterwards (used by demo)
             'ylabels'       list of str, see plot_one_path_with_pred()
             'plot_same_yaxis'   bool, whether to plot the same range on y axis
                             for all dimensions
-            'plot_obs_prob' bool, whether to plot the observation probability
             'which_loss'    'standard' or 'easy', used by models.NJODE
+            'classifier_loss_weight'    float, weighting for classification loss
             'residual_enc_dec'  bool, whether resNNs are used for encoder and
-                            readout NN, used by models.NJODE, default True
-            'use_y_for_ode' bool, whether to use y (after jump) or x_impute for
-                            the ODE as input, only in masked case, default: True
-            'coord_wise_tau'    bool, whether to use a coordinate wise tau
+                                readout NN, used by models.NJODE, default True
             'input_sig'     bool, whether to use the signature as input
             'level'         int, level of the signature that is used
-            'input_current_t'   bool, whether to additionally input current time
-                            to the ODE function f
+            'use_sig_for_classifier'    bool, whether to use the signature as
+                            additional input for the classifier network,
+                            default: False
             'training_size' int, if given and smaller than
                             dataset_size*(1-test_size), then this is the umber
                             of samples used for the training set (randomly
@@ -229,14 +223,6 @@ def train(
 
     initial_print = "model-id: {}\n".format(model_id)
 
-    use_cond_exp = True
-    if 'use_cond_exp' in options:
-        use_cond_exp = options['use_cond_exp']
-
-    masked = False
-    if 'masked' in options and 'other_model' not in options:
-        masked = options['masked']
-
     if ANOMALY_DETECTION:
         # allow backward pass to print the traceback of the forward operation
         #   if it fails, "nan" backward computation produces error
@@ -265,85 +251,68 @@ def train(
             data_dict=data_dict)
         dataset_id = int(dataset_id)
     else:
-        if dataset is None:
-            dataset = data_utils._get_datasetname(time_id=dataset_id)
-        dataset_id = int(data_utils._get_time_id(stock_model_name=dataset,
-                                                 time_id=dataset_id))
-    dataset_metadata = data_utils.load_metadata(stock_model_name=dataset,
-                                                time_id=dataset_id)
-    input_size = dataset_metadata['dimension']
-    dimension = dataset_metadata['dimension']
+        dataset = "LOB"
+        dataset_id = int(data_utils._get_time_id(
+            stock_model_name=dataset, time_id=dataset_id))
+    dataset_metadata = data_utils.load_metadata(
+        stock_model_name=dataset, time_id=dataset_id)
+    eval_predict_steps = dataset_metadata['eval_predict_steps']
+    use_volume = dataset_metadata['use_volume']
+    input_size = dataset_metadata['LOB_level']*2*(1+use_volume) + 1
+    dimension = input_size
     output_size = input_size
-    T = dataset_metadata['maturity']
-    delta_t = dataset_metadata['dt']  # copy metadata
+    delta_t = dataset_metadata['dt']
+    normalizing_price_mean = dataset_metadata["price_mean"]
+    normalizing_price_std = dataset_metadata["price_std"]
+    thresholds = dataset_metadata["thresholds"]
+    dim_to = None
+    if output_midprice_only:
+        dim_to = 1
+    train_classifier = False
+    classifier_dict = None
+    if classifier_nn is not None:
+        train_classifier = True
+        classifier_dict = {
+            "nn_desc": classifier_nn, 'input_size': hidden_size,
+            'output_size': 3, 'dropout_rate': dropout_rate, 'bias': bias,
+            'residual': False}
 
     # load raw data
     train_idx, val_idx = train_test_split(
         np.arange(dataset_metadata["nb_paths"]), test_size=test_size,
-        random_state=seed)
+        random_state=seed, shuffle=False)
     # --> get subset of training samples if wanted
     if 'training_size' in options:
         train_set_size = options['training_size']
         if train_set_size < len(train_idx):
             train_idx = np.random.choice(
-                train_idx, train_set_size, replace=False
-            )
-    data_train = data_utils.IrregularDataset(
-        model_name=dataset, time_id=dataset_id, idx=train_idx)
-    data_val = data_utils.IrregularDataset(
-        model_name=dataset, time_id=dataset_id, idx=val_idx)
+                train_idx, train_set_size, replace=False)
+    data_train = data_utils.LOBDataset(time_id=dataset_id, idx=train_idx)
+    data_val = data_utils.LOBDataset(time_id=dataset_id, idx=val_idx)
 
-    # get data-loader for training
-    if 'func_appl_X' in options:  # list of functions to apply to the paths in X
-        functions = options['func_appl_X']
-        collate_fn, mult = data_utils.CustomCollateFnGen(functions)
-        input_size = input_size * mult
-        output_size = output_size * mult
-    else:
-        functions = None
-        collate_fn, mult = data_utils.CustomCollateFnGen(None)
-        mult = 1
+    # get data-loader
+    collate_fn = data_utils.LOBCollateFnGen(
+        data_type="train", use_eval_on_train=use_eval_on_train,
+        train_classifier=train_classifier)
+    collate_fn_val = data_utils.LOBCollateFnGen(data_type="test")
 
-    dl = DataLoader(  # class to iterate over training data
+    dl = DataLoader(
         dataset=data_train, collate_fn=collate_fn,
         shuffle=True, batch_size=batch_size, num_workers=N_DATASET_WORKERS)
-    dl_val = DataLoader(  # class to iterate over validation data
-        dataset=data_val, collate_fn=collate_fn,
-        shuffle=False, batch_size=len(data_val), num_workers=N_DATASET_WORKERS)
+    dl_val = DataLoader(
+        dataset=data_val, collate_fn=collate_fn_val,
+        shuffle=False, batch_size=batch_size,
+        num_workers=N_DATASET_WORKERS)
 
     # get additional plotting information
-    plot_variance = False
-    std_factor = 1  # factor with which the std is multiplied
-    if functions is not None and mult > 1:
-        if 'plot_variance' in options:
-            plot_variance = options['plot_variance']
-        if 'std_factor' in options:
-            std_factor = options['std_factor']
     ylabels = None
     if 'ylabels' in options:
         ylabels = options['ylabels']
     plot_same_yaxis = False
     if 'plot_same_yaxis' in options:
         plot_same_yaxis = options['plot_same_yaxis']
-    plot_obs_prob = False
-    if 'plot_obs_prob' in options:
-        plot_obs_prob = options["plot_obs_prob"]
 
-    # get optimal eval loss
-    #   -> if other functions are applied to X, then only the original X is used
-    #      in the computation of the optimal eval loss
-    print(dataset_metadata)
-    stockmodel = data_utils._STOCK_MODELS[
-        dataset_metadata['model_name']](**dataset_metadata)
-    if use_cond_exp:
-        opt_eval_loss = compute_optimal_eval_loss(
-            dl_val, stockmodel, delta_t, T, mult=mult)
-        initial_print += '\noptimal eval loss (achieved by true cond exp): ' \
-                     '{:.5f}'.format(opt_eval_loss)
-    else:
-        opt_eval_loss = np.nan
-    if 'other_model' in options:
-        opt_eval_loss = np.nan
+    initial_print += "\n{}".format(dataset_metadata)
 
     # get params_dict
     params_dict = {  # create a dictionary of the wanted parameters
@@ -355,7 +324,10 @@ def train(
         'solver': solver, 'dataset': dataset, 'dataset_id': dataset_id,
         'learning_rate': learning_rate, 'test_size': test_size, 'seed': seed,
         'weight': weight, 'weight_decay': weight_decay,
-        'optimal_eval_loss': opt_eval_loss, 'options': options}
+        "output_midprice_only": output_midprice_only,
+        'use_eval_on_train': use_eval_on_train,
+        'classifier_nn': classifier_nn, 'classifier_dict': classifier_dict,
+        'options': options}
     desc = json.dumps(params_dict, sort_keys=True)  # serialize to a JSON formatted str
 
     # get overview file
@@ -370,7 +342,7 @@ def train(
             df_overview = pd.DataFrame(data=None, columns=['id', 'description'])
             max_id = 0
         else:
-            df_overview = pd.read_csv(model_overview_file_name, index_col=0)  # read model overview csv file
+            df_overview = pd.read_csv(model_overview_file_name, index_col=0)
             max_id = np.max(df_overview['id'].values)
 
         # get model_id, model params etc.
@@ -383,7 +355,7 @@ def train(
             df_overview = pd.concat([df_overview, df_ov_app], ignore_index=True)
             df_overview.to_csv(model_overview_file_name)
         else:
-            initial_print += '\nmodel_id already exists -> resume training'  # resume training if model already exists
+            initial_print += '\nmodel_id already exists -> resume training'
             resume_training = True
             desc = (df_overview['description'].loc[
                 df_overview['id'] == model_id]).values[0]
@@ -407,59 +379,17 @@ def train(
         save_extras = {}
 
     # get the model & optimizer
-    if 'other_model' not in options:  # take NJODE model if not specified otherwise
-        model = models.NJODE(**params_dict)  # get NJODE model class from
-        model_name = 'NJODE'
-    elif options['other_model'] == "GRU_ODE_Bayes":  # see train documentation
-        model_name = 'GRU-ODE-Bayes'
-        # get parameters for GRU-ODE-Bayes model
-        hidden_size = params_dict['hidden_size']
-        mixing = 0.0001
-        if 'GRU_ODE_Bayes-mixing' in options:
-            mixing = options['GRU_ODE_Bayes-mixing']
-        solver = 'euler'
-        if 'GRU_ODE_Bayes-solver' in options:
-            solver = options['GRU_ODE_Bayes-solver']
-        impute = False
-        if 'GRU_ODE_Bayes-impute' in options:
-            impute = options['GRU_ODE_Bayes-impute']
-        logvar = True
-        if 'GRU_ODE_Bayes-logvar' in options:
-            logvar = options['GRU_ODE_Bayes-logvar']
-        full_gru_ode = True
-        if 'GRU_ODE_Bayes-full_gru_ode' in options:
-            full_gru_ode = options['GRU_ODE_Bayes-full_gru_ode']
-        p_hidden = hidden_size
-        if 'GRU_ODE_Bayes-p_hidden' in options:
-            p_hidden = options['GRU_ODE_Bayes-p_hidden']
-        prep_hidden = hidden_size
-        if 'GRU_ODE_Bayes-prep_hidden' in options:
-            prep_hidden = options['GRU_ODE_Bayes-prep_hidden']
-        cov_hidden = hidden_size
-        if 'GRU_ODE_Bayes-cov_hidden' in options:
-            cov_hidden = options['GRU_ODE_Bayes-cov_hidden']
-
-        model = models_gru_ode_bayes.NNFOwithBayesianJumps(  # import GRU ODE model
-            input_size=params_dict['input_size'],
-            hidden_size=params_dict['hidden_size'],
-            p_hidden=p_hidden, prep_hidden=prep_hidden,
-            bias=params_dict['bias'],
-            cov_size=params_dict['input_size'], cov_hidden=cov_hidden,
-            logvar=logvar, mixing=mixing,
-            dropout_rate=params_dict['dropout_rate'],
-            full_gru_ode=full_gru_ode, solver=solver, impute=impute,
-        )
-    else:
-        raise ValueError("Invalid argument for (option) parameter 'other_model'."
-                         "Please check docstring for correct use.")
+    model = models.NJODE(**params_dict)  # get NJODE model class from
+    model_name = 'NJODE'
     model.to(device)  # pass model to CPU/GPU
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
-                                 weight_decay=0.0005)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=learning_rate, weight_decay=0.0005)
 
     # load saved model if wanted/possible
     best_eval_loss = np.infty
     if 'evaluate' in options and options['evaluate']:
-        metr_columns = METR_COLUMNS + ['evaluation_mean_diff']
+        metr_columns = METR_COLUMNS + [
+            'evaluation_mse', 'ref_evaluation_mse', 'evaluation_f1score']
     else:
         metr_columns = METR_COLUMNS
     if resume_training:
@@ -473,6 +403,8 @@ def train(
                                       device)
             df_metric = pd.read_csv(model_metric_file, index_col=0)
             best_eval_loss = np.min(df_metric['eval_loss'].values)
+            if 'evaluation_mse' in df_metric.columns:
+                best_eval_loss = np.min(df_metric['evaluation_mse'].values)
             model.epoch += 1
             model.weight_decay_step()
             initial_print += '\nepoch: {}, weight: {}'.format(
@@ -486,20 +418,113 @@ def train(
         df_metric = pd.DataFrame(columns=metr_columns)
 
     # ---------- plot only option ------------
+    stop = False
+    if 'plot_errors' in options and options['plot_errors']:
+        stop = True
+        with torch.no_grad():
+            eval_msd = 0
+            ref_eval_msd = 0
+            predicted_vals = np.zeros((len(data_val), dimension))
+            true_vals = np.zeros((len(data_val), dimension))
+            predicted_labels = np.zeros(len(data_val))
+            true_labels = np.zeros(len(data_val))
+            cbs = 0
+            model.eval()
+            for i, b in enumerate(dl_val):
+                times = b["times"]
+                time_ptr = b["time_ptr"]
+                X = b["X"].to(device)
+                start_X = b["start_X"].to(device)
+                bs = start_X.shape[0]
+                obs_idx = b["obs_idx"]
+                n_obs_ot = b["n_obs_ot"]
+                T = b["max_time"]
+                predict_times = b["predict_times"]
+                predict_vals = b["predict_vals"]
+                true_eval_labels = b["true_eval_labels"]
+                samples = b["true_samples"]
+                coord_to_compare = b["coord_to_compare"]
+                pred_labels = b["predict_labels"]
+
+                # mean squared error evaluation
+                if 'evaluate' in options and options['evaluate']:
+                    _eval_msd, _ref_eval_msd, _eval_f1score, _, _, _pred_vals, \
+                    _pred_labels = model.evaluate_LOB(
+                        times=times, time_ptr=time_ptr, X=X,
+                        obs_idx=obs_idx, delta_t=delta_t, T=T,
+                        start_X=start_X, n_obs_ot=n_obs_ot,
+                        return_paths=True, predict_times=predict_times,
+                        true_predict_vals=predict_vals,
+                        coord_to_compare=coord_to_compare,
+                        true_predict_labels=true_eval_labels,
+                        true_samples=samples,
+                        normalizing_mean=normalizing_price_mean,
+                        normalizing_std=normalizing_price_std,
+                        eval_predict_steps=eval_predict_steps,
+                        thresholds=thresholds, predict_labels=pred_labels)
+                    eval_msd += _eval_msd
+                    ref_eval_msd += _ref_eval_msd
+                    predicted_vals[cbs:cbs+bs] = _pred_vals
+                    true_vals[cbs:cbs+bs] = predict_vals[:, :, 0]
+                    true_labels[cbs:cbs+bs] = true_eval_labels[:, 0]
+                    if model.classifier is not None:
+                        predicted_labels[cbs:cbs+bs] = _pred_labels
+                    cbs += bs
+            pred_errors = predicted_vals[:, coord_to_compare] - \
+                          true_vals[:, coord_to_compare]
+            pred_errors = pred_errors[:, 0]
+        plot_filename = 'error-distr-plot_epoch-{}_id-{}.pdf'.format(
+            model.epoch, model_id)
+        fig, axs = plt.subplots(ncols=2)
+        axs[0].hist(pred_errors, bins=100, density=True)
+        axs[1].boxplot(pred_errors)
+        save_f = os.path.join(plot_save_path, plot_filename)
+        plt.savefig(save_f, **save_extras)
+        plt.close()
+
+        data = []
+        for which in [None, -1, 0, 1]:
+            if which is not None:
+                vals_t = true_vals[true_labels==which, coord_to_compare]
+                vals_p = predicted_vals[true_labels==which, coord_to_compare]
+            else:
+                vals_t = true_vals[:, coord_to_compare]
+                vals_p = predicted_vals[:, coord_to_compare]
+            mean_t = np.mean(vals_t)
+            mean_p = np.mean(vals_p)
+            data.append([which, mean_t, mean_p])
+        df_means = pd.DataFrame(
+            data=data, columns=["which", "true_mean", "pred_mean"])
+        means_file = "{}true_pred_means.csv".format(plot_save_path)
+        df_means.to_csv(means_file)
+
+        if SEND:
+            files_to_send = [save_f, means_file]
+            caption = "{} - id={}".format(model_name, model_id)
+            SBM.send_notification(
+                text='finished errors-plot-only: {}, id={}\n\n{}'.format(
+                    model_name, model_id, desc),
+                chat_id=config.CHAT_ID,
+                files=files_to_send,
+                text_for_files=caption)
+
     if 'plot_only' in options and options['plot_only']:
+        stop = True
+        batch = None
         for i, b in enumerate(dl_val):
             batch = b
+            break
         model.epoch -= 1
         initial_print += '\nplotting ...'
         plot_filename = 'demo-plot_epoch-{}'.format(model.epoch)
         plot_filename = plot_filename + '_path-{}.pdf'
-        curr_opt_loss = plot_one_path_with_pred(
-            device, model, batch, stockmodel, delta_t, T,
+        plot_one_path_with_pred(
+            device=device, model=model, batch=batch, delta_t=delta_t,
+            T=batch["max_time"],
             path_to_plot=paths_to_plot, save_path=plot_save_path,
-            filename=plot_filename, plot_variance=plot_variance,
-            functions=functions, std_factor=std_factor,
+            filename=plot_filename,
             model_name=model_name, save_extras=save_extras, ylabels=ylabels,
-            same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
+            same_yaxis=plot_same_yaxis,
             dataset_metadata=dataset_metadata)
         if SEND:
             files_to_send = []
@@ -512,23 +537,22 @@ def train(
                     model_name, model_id, desc),
                 chat_id=config.CHAT_ID,
                 files=files_to_send,
-                text_for_files=caption
-            )
-        initial_print += '\noptimal eval-loss (with current weight={:.5f}): ' \
-                         '{:.5f}'.format(model.weight, curr_opt_loss)
+                text_for_files=caption)
         print(initial_print)
-        return 0
+    if stop:
+        return
 
     # ---------------- TRAINING ----------------
     skip_training = True
-    if model.epoch <= epochs:  # check if it already trained the requested number of epochs
+    if model.epoch <= epochs:
         skip_training = False
 
         # send notification
         if SEND:
             SBM.send_notification(
                 text='start training - model id={}'.format(model_id),
-                chat_id=config.CHAT_ID)
+                chat_id=config.CHAT_ID
+            )
         initial_print += '\n\nmodel overview:'
         print(initial_print)
         print(model, '\n')
@@ -537,22 +561,22 @@ def train(
         nr_params = 0
         for name, param in model.named_parameters():
             skip = False
-            for p_name in ['gru_debug', 'classification_model']:
+            for p_name in []:
                 if p_name in name:
                     skip = True
             if not skip:
                 nr_params += param.nelement()  # count number of parameters
+
         print('# parameters={}\n'.format(nr_params))
         print('start training ...')
-
     metric_app = []
     while model.epoch <= epochs:
-        t = time.time()  # return the time in seconds since the epoch
-        model.train()  # set model in train mode (e.g. BatchNorm)
-        for i, b in tqdm.tqdm(enumerate(dl)):  # iterate over the dataloader
-            optimizer.zero_grad()  # reset the gradient
-            times = b["times"]  # Produce instance of byte type instead of str type
-            time_ptr = b["time_ptr"]  # pointer
+        t = time.time()
+        model.train()
+        for i, b in tqdm.tqdm(enumerate(dl)):
+            optimizer.zero_grad()
+            times = b["times"]
+            time_ptr = b["time_ptr"]
             X = b["X"].to(device)
             M = b["M"]
             if M is not None:
@@ -563,36 +587,41 @@ def train(
 
             start_X = b["start_X"].to(device)
             obs_idx = b["obs_idx"]
-            n_obs_ot = b["n_obs_ot"].to(device)
+            n_obs_ot = b["n_obs_ot"]
+            T = b["max_time"]
+            pred_labels = b["predict_labels"]
 
-            if 'other_model' not in options:
-                hT, loss = model(
-                    times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
-                    delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
-                    return_path=False, get_loss=True, M=M, start_M=start_M)
-            elif options['other_model'] == "GRU_ODE_Bayes":
-                if M is None:
-                    M = torch.ones_like(X)
-                hT, loss, _, _ = model(
-                    times, time_ptr, X, M, obs_idx, delta_t, T, start_X,
-                    return_path=False, smoother=False)
-            else:
-                raise ValueError
-            loss.backward()  # compute gradient of each weight regarding loss function
-            optimizer.step()  # update weights by ADAM optimizer
-        train_time = time.time() - t  # difference between current time and start time
+            hT, loss = model(
+                times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
+                delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
+                return_path=False, get_loss=True, M=M, start_M=start_M,
+                dim_to=dim_to, predict_labels=pred_labels)
+            if train_classifier:
+                _loss, _mse_loss, _cl_loss = loss
+                loss = _loss
+            loss.backward()
+            optimizer.step()
+        train_time = time.time() - t
 
         # -------- evaluation --------
         t = time.time()
         batch = None
-        with torch.no_grad():  # no gradient needed for evaluation
+        with torch.no_grad():
             loss_val = 0
-            loss_val_corrected = 0
+            mse_loss_val = 0
+            cl_loss_val = 0
             num_obs = 0
             eval_msd = 0
-            model.eval()  # set model in evaluation mode
-            for i, b in enumerate(dl_val):  # iterate over dataloader for validation set
-                if plot:
+            ref_eval_msd = 0
+            eval_f1score = 0
+            predicted_vals = np.zeros((len(data_val), dimension))
+            true_vals = np.zeros((len(data_val), dimension))
+            predicted_labels = np.zeros(len(data_val))
+            true_labels = np.zeros(len(data_val))
+            cbs = 0
+            model.eval()
+            for i, b in enumerate(dl_val):
+                if plot and batch is None:
                     batch = b
                 times = b["times"]
                 time_ptr = b["time_ptr"]
@@ -603,76 +632,103 @@ def train(
                 start_M = b["start_M"]
                 if start_M is not None:
                     start_M = start_M.to(device)
-
                 start_X = b["start_X"].to(device)
+                bs = start_X.shape[0]
                 obs_idx = b["obs_idx"]
-                n_obs_ot = b["n_obs_ot"].to(device)
-                true_paths = b["true_paths"]
-                true_mask = b["true_mask"]
+                n_obs_ot = b["n_obs_ot"]
+                T = b["max_time"]
+                predict_times = b["predict_times"]
+                predict_vals = b["predict_vals"]
+                true_eval_labels = b["true_eval_labels"]
+                samples = b["true_samples"]
+                coord_to_compare = b["coord_to_compare"]
+                pred_labels = b["predict_labels"]
 
-                if 'other_model' not in options:
-                    hT, c_loss = model(
-                        times, time_ptr, X, obs_idx, delta_t, T, start_X,
-                        n_obs_ot, return_path=False, get_loss=True, M=M,
-                        start_M=start_M, which_loss='standard')
-                elif options['other_model'] == "GRU_ODE_Bayes":
-                    if M is None:
-                        M = torch.ones_like(X)
-                    hT, c_loss, _, _ = model(
-                        times, time_ptr, X, M, obs_idx, delta_t, T, start_X,
-                        return_path=False, smoother=False,)
+                hT, c_loss = model(
+                    times, time_ptr, X, obs_idx, delta_t, T, start_X,
+                    n_obs_ot, return_path=False, get_loss=True, M=M,
+                    start_M=start_M, which_loss='standard', dim_to=dim_to,
+                    predict_labels=pred_labels)
+                if train_classifier:
+                    c_loss, c_mse_loss, c_cl_loss = c_loss
+                    c_mse_loss = c_mse_loss.detach().numpy()
+                    c_cl_loss = c_cl_loss.detach().numpy()
                 else:
-                    raise ValueError
+                    c_mse_loss, c_cl_loss = np.nan, np.nan
                 loss_val += c_loss.detach().numpy()
+                mse_loss_val += c_mse_loss
+                cl_loss_val += c_cl_loss
                 num_obs += 1  # count number of observations
 
-                # if functions are applied, also compute the loss when only
-                #   using the coordinates where function was not applied
-                #   -> this can be compared to the optimal-eval-loss
-                if mult is not None and mult > 1:
-                    if 'other_model' not in options:
-                        hT_corrected, c_loss_corrected = model(
-                            times, time_ptr, X, obs_idx, delta_t, T, start_X,
-                            n_obs_ot, return_path=False, get_loss=True, M=M,
-                            start_M=start_M, which_loss='standard',
-                            dim_to=dimension)
-                    loss_val_corrected += c_loss_corrected.detach().numpy()
-
-                # mean squared difference evaluation
+                # mean squared error evaluation
                 if 'evaluate' in options and options['evaluate']:
-                    if use_cond_exp:
-                        true_paths = None
-                        true_mask = None
-                    _eval_msd = model.evaluate(
-                        times=times, time_ptr=time_ptr, X=X,
-                        obs_idx=obs_idx, delta_t=delta_t, T=T,
-                        start_X=start_X, n_obs_ot=n_obs_ot,
-                        stockmodel=stockmodel, return_paths=False, M=M,
-                        start_M=start_M, true_paths=true_paths,
-                        true_mask=true_mask, mult=mult)
+                    _eval_msd, _ref_eval_msd, _eval_f1score, _, _, _pred_vals, \
+                    _pred_labels = model.evaluate_LOB(
+                            times=times, time_ptr=time_ptr, X=X,
+                            obs_idx=obs_idx, delta_t=delta_t, T=T,
+                            start_X=start_X, n_obs_ot=n_obs_ot,
+                            return_paths=True, predict_times=predict_times,
+                            true_predict_vals=predict_vals,
+                            coord_to_compare=coord_to_compare,
+                            true_predict_labels=true_eval_labels,
+                            true_samples=samples,
+                            normalizing_mean=normalizing_price_mean,
+                            normalizing_std=normalizing_price_std,
+                            eval_predict_steps=eval_predict_steps,
+                            thresholds=thresholds, predict_labels=pred_labels)
                     eval_msd += _eval_msd
+                    ref_eval_msd += _ref_eval_msd
+                    predicted_vals[cbs:cbs+bs] = _pred_vals
+                    true_vals[cbs:cbs+bs] = predict_vals[:, :, 0]
+                    true_labels[cbs:cbs+bs] = true_eval_labels[:, 0]
+                    if model.classifier is not None:
+                        predicted_labels[cbs:cbs+bs] = _pred_labels
+                    cbs += bs
+                    if _eval_f1score is not None:
+                        eval_f1score += _eval_f1score
 
             eval_time = time.time() - t
             loss_val = loss_val / num_obs
-            loss_val_corrected /= num_obs
+            mse_loss_val = mse_loss_val / num_obs
+            cl_loss_val = cl_loss_val / num_obs
             eval_msd = eval_msd / num_obs
+            ref_eval_msd /= num_obs
+            eval_f1score = eval_f1score / num_obs
             train_loss = loss.detach().numpy()
             print_str = "epoch {}, weight={:.5f}, train-loss={:.5f}, " \
-                        "optimal-eval-loss={:.5f}, eval-loss={:.5f}, ".format(
-                model.epoch, model.weight, train_loss, opt_eval_loss, loss_val)
-            if mult is not None and mult > 1:
-                print_str += "\ncorrected(i.e. without additional dims of " \
-                             "funct_appl_X)-eval-loss={:.5f}, ".format(
-                    loss_val_corrected)
+                        "eval-loss={:.5f}, mse-eval-loss={:.5f}, " \
+                        "classification-eval-loss={:.5f},".format(
+                model.epoch, model.weight, train_loss, loss_val, mse_loss_val,
+                cl_loss_val)
             print(print_str)
+
+            # compute overall f1-score and classification report
+            if 'evaluate' in options and options['evaluate'] and \
+                    model.classifier is not None:
+                eval_f1score = sklearn.metrics.f1_score(
+                    true_labels, predicted_labels,
+                    average="weighted")
+                print("classification report \n",
+                      sklearn.metrics.classification_report(
+                          true_labels, predicted_labels))
+
         if 'evaluate' in options and options['evaluate']:
             metric_app.append([model.epoch, train_time, eval_time, train_loss,
-                               loss_val, opt_eval_loss, eval_msd])
-            print("evaluation mean square difference={:.5f}".format(
-                eval_msd))
+                               loss_val, mse_loss_val, cl_loss_val,
+                               eval_msd, ref_eval_msd, eval_f1score])
+            eval_string = "evaluation mean square differences: k={}, " \
+                          "eval_mse={:.5f}, (ref_eval_mse={:.5f})".format(
+                eval_predict_steps[0], eval_msd, ref_eval_msd)
+            eval_string_f1 = "evaluation f1 scores: k={}, " \
+                             "eval_f1-score={:.5f}".format(
+                eval_predict_steps[0], eval_f1score)
+            print(eval_string)
+            print(eval_string_f1)
+            loss_to_compare = eval_msd
         else:
             metric_app.append([model.epoch, train_time, eval_time, train_loss,
-                               loss_val, opt_eval_loss])
+                               loss_val, mse_loss_val, cl_loss_val])
+            loss_to_compare = loss_val
 
         # save model
         if model.epoch % save_every == 0:
@@ -680,18 +736,15 @@ def train(
                 print('plotting ...')
                 plot_filename = 'epoch-{}'.format(model.epoch)
                 plot_filename = plot_filename + '_path-{}.pdf'
-                curr_opt_loss = plot_one_path_with_pred(
+                plot_one_path_with_pred(
                     device=device, model=model, batch=batch,
-                    stockmodel=stockmodel, delta_t=delta_t, T=T,
+                    delta_t=delta_t, T=batch["max_time"],
                     path_to_plot=paths_to_plot, save_path=plot_save_path,
-                    filename=plot_filename, plot_variance=plot_variance,
-                    functions=functions, std_factor=std_factor,
+                    filename=plot_filename,
                     model_name=model_name, save_extras=save_extras,
-                    ylabels=ylabels, use_cond_exp=use_cond_exp,
-                    same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
+                    ylabels=ylabels,
+                    same_yaxis=plot_same_yaxis,
                     dataset_metadata=dataset_metadata)
-                print('optimal eval-loss (with current weight={:.5f}): '
-                      '{:.5f}'.format(model.weight, curr_opt_loss))
             print('save model ...')
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
@@ -700,10 +753,10 @@ def train(
                                    model.epoch)
             metric_app = []
             print('saved!')
-        if loss_val < best_eval_loss:
+        if loss_to_compare < best_eval_loss:
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
-                best_eval_loss, loss_val, model.epoch))
+                best_eval_loss, loss_to_compare, model.epoch))
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
             df_metric.to_csv(model_metric_file)
@@ -712,7 +765,7 @@ def train(
             models.save_checkpoint(model, optimizer, model_path_save_best,
                                    model.epoch)
             metric_app = []
-            best_eval_loss = loss_val
+            best_eval_loss = loss_to_compare
             print('saved!')
         print("-"*100)
 
@@ -728,7 +781,7 @@ def train(
                 files_to_send.append(
                     os.path.join(plot_save_path, plot_filename.format(i)))
         SBM.send_notification(
-            text='finished training: {}, id={}\n\n{}'.format(
+            text='finished LOB training: {}, id={}\n\n{}'.format(
                 model_name, model_id, desc),
             chat_id=config.CHAT_ID,
             files=files_to_send,
@@ -738,46 +791,13 @@ def train(
     del model, dl, dl_val, data_train, data_val
     gc.collect()
 
-    return 0
-
-
-def compute_optimal_eval_loss(dl_val, stockmodel, delta_t, T, mult=None):
-    """
-    compute optimal evaluation loss (with the true cond. exp.) on the
-    test-dataset
-    :param dl_val: torch.DataLoader, used for the validation dataset
-    :param stockmodel: stock_model.StockModel instance
-    :param delta_t: float, the time_delta
-    :param T: float, the terminal time
-    :return: float (optimal loss)
-    """
-    opt_loss = 0
-    num_obs = 0
-    for i, b in enumerate(dl_val):
-        times = b["times"]
-        time_ptr = b["time_ptr"]
-        X = b["X"].detach().numpy()
-        start_X = b["start_X"].detach().numpy()
-        obs_idx = b["obs_idx"].detach().numpy()
-        n_obs_ot = b["n_obs_ot"].detach().numpy()
-        M = b["M"]
-        if M is not None:
-            M = M.detach().numpy()
-        num_obs += 1
-        opt_loss += stockmodel.get_optimal_loss(
-            times, time_ptr, X, obs_idx, delta_t, T, start_X, n_obs_ot, M=M,
-            mult=mult)
-    return opt_loss / num_obs
-
 
 def plot_one_path_with_pred(
-        device, model, batch, stockmodel, delta_t, T,
+        device, model, batch, delta_t, T,
         path_to_plot=(0,), save_path='', filename='plot_{}.pdf',
-        plot_variance=False, functions=None, std_factor=1,
         model_name=None, ylabels=None,
         save_extras={'bbox_inches': 'tight', 'pad_inches': 0.01},
-        use_cond_exp=True, same_yaxis=False,
-        plot_obs_prob=False, dataset_metadata=None,
+        same_yaxis=False, dataset_metadata=None, dims_to=1,
 ):
     """
     plot one path of the stockmodel together with optimal cond. exp. and its
@@ -794,21 +814,14 @@ def plot_one_path_with_pred(
     :param save_path: str, the path where to save the plot
     :param filename: str, the filename for the plot, should have one insertion
             possibility to put the path number
-    :param plot_variance: bool, whether to plot the variance, if supported by
-            functions (i.e. square has to be applied)
-    :param functions: list of functions (as str), the functions applied to X
-    :param std_factor: float, the factor by which std is multiplied
     :param model_name: str or None, name used for model in plots
     :param ylabels: None or list of str of same length as dimension of X
     :param save_extras: dict with extra options for saving plot
-    :param use_cond_exp: bool, whether to plot the conditional expectation
     :param same_yaxis: bool, whether to plot all coordinates with same range on
         y-axis
-    :param plot_obs_prob: bool, whether to plot the probability of an
-        observation for all times
     :param dataset_metadata: needed if plot_obs_prob=true, the metadata of the
         used dataset to extract the observation probability
-    :return: optimal loss
+    :param dims_to: int or None, up to which coordinate to plot
     """
     if model_name is None or model_name == "NJODE":
         model_name = 'our model'
@@ -831,11 +844,14 @@ def plot_one_path_with_pred(
         start_M = start_M.to(device)
     obs_idx = batch["obs_idx"]
     n_obs_ot = batch["n_obs_ot"].to(device)
-    true_X = batch["true_paths"]
+    true_X = batch["true_samples"]
     bs, dim, time_steps = true_X.shape
     true_M = batch["true_mask"]
-    observed_dates = batch['observed_dates']
-    path_t_true_X = np.linspace(0., T, int(np.round(T / delta_t)) + 1)
+    path_t_true_X = batch["true_times"]
+    predict_times = batch["predict_times"]
+    predict_vals = batch["predict_vals"]
+    if dims_to is not None:
+        dim = dims_to
 
     model.eval()  # put model in evaluation mode
     res = model.get_pred(
@@ -844,84 +860,36 @@ def plot_one_path_with_pred(
     path_y_pred = res['pred'].detach().numpy()
     path_t_pred = res['pred_t']
 
-    # get variance path
-    if plot_variance and (functions is not None) and ('power-2' in functions):
-        which = np.argmax(np.array(functions) == 'power-2')+1
-        y2 = path_y_pred[:, :, (dim * which):(dim * (which + 1))]
-        path_var_pred = y2 - np.power(path_y_pred[:, :, 0:dim], 2)
-        if np.any(path_var_pred < 0):
-            print('WARNING: some predicted cond. variances below 0 -> clip')
-            path_var_pred = np.maximum(0, path_var_pred)
-        path_std_pred = np.sqrt(path_var_pred)
-    else:
-        plot_variance = False
-    if use_cond_exp:
-        if M is not None:
-            M = M.detach().numpy()
-        opt_loss, path_t_true, path_y_true = stockmodel.compute_cond_exp(
-            times, time_ptr, X.detach().numpy(), obs_idx.detach().numpy(),
-            delta_t, T, start_X.detach().numpy(), n_obs_ot.detach().numpy(),
-            return_path=True, get_loss=True, weight=model.weight,
-            M=M,)
-    else:
-        opt_loss = 0
-
     for i in path_to_plot:
         fig, axs = plt.subplots(dim)
         if dim == 1:
             axs = [axs]
         for j in range(dim):
-            # get the true_X at observed dates
-            path_t_obs = []
-            path_X_obs = []
-            for k, od in enumerate(observed_dates[i]):
-                if od == 1:
-                    if true_M is None or (true_M is not None and
-                                          true_M[i, j, k]==1):
-                        path_t_obs.append(path_t_true_X[k])
-                        path_X_obs.append(true_X[i, j, k])
-            path_t_obs = np.array(path_t_obs)
-            path_X_obs = np.array(path_X_obs)
+            path_t_obs = path_t_true_X[i]
+            # path_X_obs = true_X[i, j, :]
 
-            axs[j].plot(path_t_true_X, true_X[i, j, :], label='true path',
+            axs[j].plot(path_t_obs, true_X[i, j, :], label='true path',
                         color=colors[0])
-            axs[j].scatter(path_t_obs, path_X_obs, label='observed',
-                           color=colors[0])
+            # axs[j].scatter(path_t_obs, path_X_obs, label='observed',
+            #                color=colors[0])
             axs[j].plot(path_t_pred, path_y_pred[:, i, j],
                         label=model_name, color=colors[1])
-            if plot_variance:
-                # axs[j].plot(
-                #     path_t_pred,
-                #     path_y_pred[:, i, j] + std_factor*path_std_pred[:, i, j],
-                #     color=colors[1])
-                # axs[j].plot(
-                #     path_t_pred,
-                #     path_y_pred[:, i, j] - std_factor*path_std_pred[:, i, j],
-                #     color=colors[1])
-                axs[j].fill_between(
-                    path_t_pred,
-                    path_y_pred[:, i, j] - std_factor * path_std_pred[:, i, j],
-                    path_y_pred[:, i, j] + std_factor * path_std_pred[:, i, j],
-                    color=std_color)
-            if use_cond_exp:
-                axs[j].plot(path_t_true, path_y_true[:, i, j],
-                            label='true conditional expectation',
-                            linestyle=':', color=colors[2])
-            if plot_obs_prob and dataset_metadata is not None:
-                ax2 = axs[j].twinx()
-                if "X_dependent_observation_prob" in dataset_metadata:
-                    prob_f = eval(
-                        dataset_metadata["X_dependent_observation_prob"])
-                    obs_perc = prob_f(true_X[:, :, :])[i]
-                else:
-                    obs_perc = dataset_metadata['obs_perc']
-                    obs_perc = np.ones_like(path_t_true_X) * obs_perc
-                ax2.plot(path_t_true_X, obs_perc, color="red",
-                         label="observation probability")
-                ax2.set_ylim(-0.1, 1.1)
-                ax2.set_ylabel("observation probability")
-                axs[j].set_ylabel("X")
-                ax2.legend()
+            axs[j].scatter(
+                predict_times[i, :], predict_vals[i, j, :], label='eval points',
+                color=colors[2])
+
+            low = np.min(path_t_obs)
+            high = np.max(predict_times[i, :])
+            eps = (high - low)*0.05
+            axs[j].set_xlim([low-eps, high+eps])
+            last_ind = np.argmin(np.abs(path_t_pred - high))
+            low_y = min(np.min(path_y_pred[:last_ind+1, i, j]),
+                        np.min(predict_vals[i, j, :]))
+            high_y = max(np.max(path_y_pred[:last_ind+1, i, j]),
+                         np.max(predict_vals[i, j, :]))
+            eps_y = (high_y - low_y)*0.05
+            axs[j].set_ylim([low_y-eps_y, high_y+eps_y])
+
             if ylabels:
                 axs[j].set_ylabel(ylabels[j])
             if same_yaxis:
@@ -930,13 +898,11 @@ def plot_one_path_with_pred(
                 eps = (high - low)*0.05
                 axs[j].set_ylim([low-eps, high+eps])
 
-
         axs[-1].legend()
         plt.xlabel('$t$')
         save = os.path.join(save_path, filename.format(i))
         plt.savefig(save, **save_extras)
         plt.close()
 
-    return opt_loss
 
 

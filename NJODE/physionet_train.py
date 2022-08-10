@@ -89,7 +89,7 @@ def train(
         ode_nn=default_ode_nn, readout_nn=default_readout_nn,
         enc_nn=default_enc_nn, use_rnn=False,
         solver="euler", weight=0.5, weight_decay=1.,
-        dataset='physionet', saved_models_path=saved_models_path,
+        saved_models_path=saved_models_path,
         quantization=0.016, n_samples=8000,
         eval_input_prob=None, eval_input_seed=3892,
         **options
@@ -156,6 +156,8 @@ def train(
                             the last checkpoint when loading the model. Mainly
                             used for evaluating model at the best checkpoint.
     """
+    dataset = 'physionet'
+
     global ANOMALY_DETECTION, USE_GPU, SEND, N_CPUS, N_DATASET_WORKERS
     if anomaly_detection is not None:
         ANOMALY_DETECTION = anomaly_detection

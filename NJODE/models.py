@@ -24,7 +24,7 @@ def init_weights(m, bias=0.0):  # initialize weights for model for linear NN
             m.bias.data.fill_(bias)
 
 
-def save_checkpoint(model, optimizer, path, epoch):
+def save_checkpoint(model, optimizer, path, epoch, retrain_epoch=0):
     """
     save a trained torch model and the used optimizer at the given path, s.t.
     training can be resumed at the exact same point
@@ -38,6 +38,7 @@ def save_checkpoint(model, optimizer, path, epoch):
     filename = os.path.join(path, 'checkpt.tar')
     torch.save({'epoch': epoch,
                 'weight': model.weight,
+                'retrain_epoch': retrain_epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict()},
                filename)
@@ -62,6 +63,8 @@ def get_ckpt_model(ckpt_path, model, optimizer, device):
     model.load_state_dict(state_dict)
     model.epoch = checkpt['epoch']
     model.weight = checkpt['weight']
+    if 'retrain_epoch' in checkpt:
+        model.retrain_epoch = checkpt['retrain_epoch']
     model.to(device)
 
 
@@ -391,6 +394,7 @@ class NJODE(torch.nn.Module):
         super().__init__()  # super refers to base class, init initializes
 
         self.epoch = 1
+        self.retrain_epoch = 0
         self.weight = weight
         self.weight_decay = weight_decay
         self.use_rnn = use_rnn  # use RNN for jumps
@@ -429,6 +433,9 @@ class NJODE(torch.nn.Module):
         classifier_dict = None
         if 'classifier_dict' in options:
             classifier_dict = options["classifier_dict"]
+        self.use_sig_for_classifier = False
+        if 'use_sig_for_classifier' in options1:
+            self.use_sig_for_classifier = options1['use_sig_for_classifier']
         self.class_loss_weight = 1.
         self.loss_weight = 1.
         if 'classifier_loss_weight' in options1:
@@ -453,19 +460,24 @@ class NJODE(torch.nn.Module):
             input_size=hidden_size, output_size=output_size, nn_desc=readout_nn,
             dropout_rate=dropout_rate, bias=bias,
             residual=self.residual_enc_dec)
-        self.classifier = None
-        if classifier_dict is not None:
-            self.classifier = []
-            for i in range(classifier_dict['nb_classifiers']):
-                self.classifier.append(FFNN(**classifier_dict))
-            self.SM = torch.nn.Softmax(dim=1)
-            self.CEL = torch.nn.CrossEntropyLoss()
+        self.get_classifier(classifier_dict=classifier_dict)
 
         self.solver = solver
         self.input_size = input_size
         self.hidden_size = hidden_size
 
         self.apply(init_weights)
+
+    def get_classifier(self, classifier_dict):
+        self.classifier = None
+        self.SM = None
+        self.CEL = None
+        if classifier_dict is not None:
+            if self.use_sig_for_classifier:
+                classifier_dict['input_size'] += self.sig_depth
+            self.classifier = FFNN(**classifier_dict)
+            self.SM = torch.nn.Softmax(dim=1)
+            self.CEL = torch.nn.CrossEntropyLoss()
 
     def weight_decay_step(self):
         inc = (self.weight - 0.5)
@@ -551,7 +563,8 @@ class NJODE(torch.nn.Module):
     def forward(self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
                 n_obs_ot, return_path=False, get_loss=True, until_T=False,
                 M=None, start_M=None, which_loss=None, dim_to=None,
-                predict_labels=None, return_classifier_out=False):
+                predict_labels=None, return_classifier_out=False,
+                return_at_last_obs=False):
         """
         the forward run of this module class, used when calling the module
         instance without a method
@@ -640,6 +653,8 @@ class NJODE(torch.nn.Module):
             path_t = [0]
             path_h = [h]
             path_y = [self.readout_map(h)]
+        h_at_last_obs = h.clone()
+        sig_at_last_obs = c_sig
 
         assert len(times) + 1 == len(time_ptr)
 
@@ -700,6 +715,10 @@ class NJODE(torch.nn.Module):
             h = temp
             Y = self.readout_map(h)
 
+            # update h and sig at last observation
+            h_at_last_obs[i_obs.long()] = h[i_obs.long()].clone()
+            sig_at_last_obs = c_sig
+
             if get_loss:
                 loss = loss + LOSS_FUN_DICT[which_loss](
                     X_obs=X_obs[:, :dim_to], Y_obs=Y[i_obs.long(), :dim_to],
@@ -729,18 +748,16 @@ class NJODE(torch.nn.Module):
                 path_h.append(h)
                 path_y.append(Y)
 
-        #after last observation has been processed, apply classifier if wanted
+        # after last observation has been processed, apply classifier if wanted
         cl_out = None
         if self.classifier is not None and predict_labels is not None:
-            _, amount_pred = predict_labels.shape
             cl_loss = torch.tensor(0.)
-            cl_out = []
-            for j in range(amount_pred):
-                _cl_out = self.classifier[j](h)
-                cl_out.append(_cl_out)
-                cl_loss = cl_loss + self.CEL(
-                    input=self.SM(_cl_out),
-                    target=predict_labels[:, j])
+            cl_input = h_at_last_obs
+            if self.use_sig_for_classifier:
+                cl_input = torch.cat([cl_input, sig_at_last_obs], dim=1)
+            cl_out = self.classifier(cl_input)
+            cl_loss = cl_loss + self.CEL(
+                input=self.SM(cl_out), target=predict_labels[:, 0])
             loss = [self.loss_weight*loss + self.class_loss_weight*cl_loss,
                     loss, cl_loss]
 
@@ -766,9 +783,11 @@ class NJODE(torch.nn.Module):
                     path_h.append(h)
                     path_y.append(self.readout_map(h))
 
+        if return_at_last_obs:
+            return h_at_last_obs, sig_at_last_obs
         if return_path:
             # path dimension: [time_steps, batch_size, output_size]
-            if return_classifier_out and self.classifier is not None:
+            if return_classifier_out:
                 return h, loss, np.array(path_t), torch.stack(path_h), \
                        torch.stack(path_y)[:, :, :dim_to], cl_out
             return h, loss, np.array(path_t), torch.stack(path_h), \
@@ -854,7 +873,7 @@ class NJODE(torch.nn.Module):
             true_predict_vals=None, true_predict_labels=None, true_samples=None,
             normalizing_mean=0., normalizing_std=1., eval_predict_steps=None,
             thresholds=None, predict_labels=None,
-            coord_to_compare=(0,)):
+            coord_to_compare=(0,), class_report=False):
         """
         evaluate the model at its current training state for the LOB dataset
 
@@ -888,6 +907,7 @@ class NJODE(torch.nn.Module):
         :param coord_to_compare: list or None, the coordinates on which the
                 output and input are compared, applied to the inner dimension of
                 the time series, e.g. use [0] to compare on the midprice only
+        :param class_report: bool, whether to print the classification report
         :return: eval-loss, if wanted paths t, y for true and pred
         """
         self.eval()
@@ -906,44 +926,56 @@ class NJODE(torch.nn.Module):
         path_y = path_y.detach().numpy()
         predicted_vals = np.zeros_like(true_predict_vals)
         for i in range(bs):
-            for j, t in enumerate(predict_times[i]):
-                t_ind = np.argmin(np.abs(path_t - t))
-                predicted_vals[i, :, j] = path_y[t_ind, i, :]
+            t = predict_times[i][0]
+            t_ind = np.argmin(np.abs(path_t - t))
+            predicted_vals[i, :, 0] = path_y[t_ind, i, :]
 
         eval_loss = np.nanmean(
-            (predicted_vals[:, coord_to_compare, :] -
-             true_predict_vals[:, coord_to_compare, :])**2,
+            (predicted_vals[:, coord_to_compare, 0] -
+             true_predict_vals[:, coord_to_compare, 0])**2,
+            axis=(0,1))
+
+        ref_eval_loss = np.nanmean(
+            (true_samples[:, coord_to_compare, -1] -
+             true_predict_vals[:, coord_to_compare, 0])**2,
             axis=(0,1))
 
         f1_scores = None
+        predicted_labels = None
         if true_samples is not None and true_predict_labels is not None:
-            f1_scores = []
-            for i, k in enumerate(eval_predict_steps):
-                if cl_out is not None:
-                    class_probs = self.SM(cl_out[i]).detach().numpy()
-                    classes = np.argmax(class_probs, axis=1) - 1
-                    f1_scores.append(sklearn.metrics.f1_score(
-                        true_predict_labels[:, i], classes,
-                        average="weighted"))
-                else:
-                    m_minus = np.mean(true_samples[:, 0, -k:]*normalizing_std +
-                                      normalizing_mean, axis=1)
-                    m_plus = predicted_vals[:, 0, i]*normalizing_std + \
-                             normalizing_mean
-                    pctc = (m_plus - m_minus) / m_minus
-                    predicted_labels = np.zeros(bs)
-                    predicted_labels[pctc > thresholds[i]] = 1
-                    predicted_labels[pctc < -thresholds[i]] = -1
-                    f1_scores.append(sklearn.metrics.f1_score(
-                        true_predict_labels[:, i], predicted_labels,
-                        average="weighted"))
-                    print("classification report \n",
-                          sklearn.metrics.classification_report(
-                              true_predict_labels[:, i], predicted_labels,))
-            f1_scores = np.array(f1_scores)
+            predicted_labels = np.zeros(bs)
+            if cl_out is not None:
+                class_probs = self.SM(cl_out).detach().numpy()
+                classes = np.argmax(class_probs, axis=1) - 1
+                f1_scores = sklearn.metrics.f1_score(
+                    true_predict_labels[:, 0], classes,
+                    average="weighted")
+                predicted_labels = classes
+            else:
+                # TODO: this computes the labels incorrectly, since the shift by
+                #  X_0 is missing -> results should not be trusted, better to
+                #  use classifier
+                m_minus = np.mean(
+                    true_samples[:, 0, -eval_predict_steps[0]:] *
+                    normalizing_std + normalizing_mean, axis=1)
+                m_plus = predicted_vals[:, 0, 0]*normalizing_std + \
+                         normalizing_mean
+                pctc = (m_plus - m_minus) / m_minus
+                predicted_labels[pctc > thresholds[0]] = 1
+                predicted_labels[pctc < -thresholds[0]] = -1
+                f1_scores = sklearn.metrics.f1_score(
+                    true_predict_labels[:, 0], predicted_labels,
+                    average="weighted")
+            if class_report:
+                print("eval-mse: {:.5f}".format(eval_loss))
+                print("f1-score: {:.5f}".format(f1_scores))
+                print("classification report \n",
+                      sklearn.metrics.classification_report(
+                          true_predict_labels[:, 0], predicted_labels,))
 
         if return_paths:
-            return eval_loss, f1_scores, path_t, path_y
+            return eval_loss, ref_eval_loss, f1_scores, path_t, path_y, \
+                   predicted_vals[:, :, 0], predicted_labels
         else:
             return eval_loss, f1_scores
 
@@ -969,3 +1001,12 @@ class NJODE(torch.nn.Module):
             return_path=True, get_loss=False, until_T=True, M=M,
             start_M=start_M)
         return {'pred': path_y, 'pred_t': path_t}
+
+    def forward_classifier(self, x, y):
+        # after last observation has been processed, apply classifier if wanted
+        cl_out = None
+        cl_loss = None
+        if self.classifier is not None:
+            cl_out = self.classifier(x)
+            cl_loss = self.CEL(input=self.SM(cl_out), target=y)
+        return cl_loss, cl_out

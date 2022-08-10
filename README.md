@@ -14,10 +14,13 @@ All experiments from the first part can be run with this repo as well (see
 
 This code was executed using Python 3.7.
 
-To install requirements, download this Repo and cd into it. Then (e.g. in a new 
-conda environment):
+To install requirements, download this Repo and cd into it. 
 
+Then create a new environment and install all dependencies and this repo.
+With [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html):
 ```sh
+conda create --name njode python=3.7
+conda activate njode
 pip install -r requirements.txt
 ```
 
@@ -56,6 +59,31 @@ python data_utils.py --dataset_name=BM --dataset_params=BM_dict
 generate BS with dependent observation intensity dataset:
 ```sh
 python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_dep_intensity_dict
+```
+
+generate Limit Order Book (LOB) dataset with raw data from Covario 
+(**ATTENTION**: the needed raw data was provided by Covario but is not publicly 
+available, hence this data generation will raise an error, unless you provide a 
+working link to raw data):
+```sh
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict1
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict1_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict3
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict3_2
+```
+
+generate Limit Order Book (LOB) dataset with raw data from [Kaggle data](https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data):
+```sh
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_1
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_1_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_3
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_3_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_4
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_4_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_6
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_6_2
 ```
 
 
@@ -122,10 +150,9 @@ python run.py --plot_paths=plot_paths_BMVar_dict
 
 train model on dependent observation intensity datasets:
 ```sh
-python run.py --params=param_list_DepIntensity_1 --NB_JOBS=2 --NB_CPUS=1 --first_id=1
+python run.py --params=param_list_DepIntensity_1 --NB_JOBS=24 --NB_CPUS=1 --first_id=1
 python run.py --plot_paths=plot_paths_DepIntensity_dict
 ```
-
 
 train model on PhysioNet datasets:
 ```sh
@@ -137,6 +164,39 @@ train model on Climate datasets:
 python run.py --params=param_list_climate --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_climate --crossval=crossval_dict_climate
 ```
 
+train model on Limit Order Book datasets:
+```sh
+python run.py --params=param_list_LOB --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB
+```
+
+retrain classifier on LOB dataset:
+```shell
+python run.py --params=param_list_retrainLOB --NB_JOBS=42 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_retrainLOB
+```
+
+train model on Limit Order Book Kaggle datasets:
+```sh
+python run.py --params=param_list_LOB_K --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB_K
+python run.py --params=param_list_LOB_n --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB_n
+python run.py --plot_paths=plot_paths_LOB_K_dict
+```
+
+retrain classifier on LOB Kaggle dataset:
+```shell
+python run.py --params=param_list_retrainLOB_K --NB_JOBS=42 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_retrainLOB_K
+python run.py --params=param_list_retrainLOB_n --NB_JOBS=42 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_retrainLOB_n
+```
+
+training of the DeepLOB model from the paper [DeepLOB: Deep Convolutional Neural Networks for Limit Order Books](https://arxiv.org/abs/1808.03668) as comparison
+```shell
+# training of the DeepLOB model
+python ../DeepLOB/train_DeepLOB.py
+```
+
+fitting of LinReg models as baselines on LOB data:
+```shell
+python LOB_linreg.py
+```
 
 
 
@@ -182,7 +242,13 @@ Parts of this code are based on and/or copied from the code of:
 https://github.com/edebrouwer/gru_ode_bayes, of the paper
 [GRU-ODE-Bayes: Continuous modeling of sporadically-observed time series](https://arxiv.org/abs/1905.12374)
 and the code of: https://github.com/YuliaRubanova/latent_ode, of the paper
-[Latent ODEs for Irregularly-Sampled Time Series](https://arxiv.org/abs/1907.03907).
+[Latent ODEs for Irregularly-Sampled Time Series](https://arxiv.org/abs/1907.03907)
+and the code of: https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Networks-for-Limit-Order-Books/, of the paper
+[DeepLOB: Deep convolutional neural networks for limit order books](https://arxiv.org/abs/1808.03668).
+
+The [High Frequency Crypto Limit Order Book Data](https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data)
+was made public in Kaggle.
+The other bitcoin LOB dataset was gratefully provided by Covario, but is not publicly available.
 
 The GIFs of the training progress were generated with imageio:
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3674137.svg)](https://doi.org/10.5281/zenodo.3674137)

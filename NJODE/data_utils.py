@@ -73,6 +73,7 @@ def create_dataset(
 
     np.random.seed(seed=seed)
     hyperparam_dict['model_name'] = stock_model_name
+    original_desc = json.dumps(hyperparam_dict, sort_keys=True)
     obs_perc = hyperparam_dict['obs_perc']
     masked = False
     if "masked" in hyperparam_dict and hyperparam_dict['masked'] is not None:
@@ -110,9 +111,6 @@ def create_dataset(
     if len(df_overview) > 0:
         time_id = np.max(df_overview["id"].values) + 1
     file_name = '{}-{}'.format(stock_model_name, time_id)
-    if stock_model_name in ["FBM"]:
-        file_name = '{}[h={}]-{}'.format(
-            stock_model_name,hyperparam_dict['hurst'], time_id)
     path = '{}{}/'.format(training_data_path, file_name)
     hyperparam_dict['dt'] = dt
     desc = json.dumps(hyperparam_dict, sort_keys=True)
@@ -120,7 +118,7 @@ def create_dataset(
         print('Path already exists - abort')
         raise ValueError
     df_app = pd.DataFrame(
-        data=[[stock_model_name, time_id, desc]],
+        data=[[stock_model_name, time_id, original_desc]],
         columns=['name', 'id', 'description']
     )
     df_overview = pd.concat([df_overview, df_app],
@@ -227,6 +225,226 @@ def create_combined_dataset(
     return path, time_id
 
 
+def create_LOB_dataset(hyperparam_dict=hyperparam_default,
+                       seed=0):
+    """
+    create Limit Order Book (LOB) datasets.
+    Args:
+        hyperparam_dict: dict, with all needed hyperparams
+        seed: int, the seed for any random numbers
+    Returns: path to dataset, id of dataset
+    """
+    if "which_raw_data" in hyperparam_dict and \
+        hyperparam_dict["which_raw_data"] in [
+        "ADA_1min", "ADA_1sec", "ADA_5min", "BTC_1min", "BTC_1sec", "BTC_5min",
+        "ETH_1min", "ETH_1sec", "ETH_5min",]:
+        df_raw = get_rawLOB_dataset2(hyperparam_dict, seed)
+    else:
+        df_raw = get_rawLOB_dataset1(hyperparam_dict, seed)
+
+    df_overview, data_overview = get_dataset_overview()
+    model_name = "LOB"
+
+    np.random.seed(seed=seed)
+    hyperparam_dict['model_name'] = model_name
+    original_desc = json.dumps(hyperparam_dict, sort_keys=True)
+    level = hyperparam_dict["LOB_level"]
+    amount_obs = hyperparam_dict["amount_obs"]
+    eval_predict_steps = hyperparam_dict["eval_predict_steps"]
+    use_volume = hyperparam_dict["use_volume"]
+    normalize = hyperparam_dict["normalize"]
+    start_at_0 = True
+    if "start_at_0" in hyperparam_dict:
+        start_at_0 = hyperparam_dict["start_at_0"]
+    shift = hyperparam_dict["shift"]
+    max_pred_step = int(np.max(eval_predict_steps))
+    hyperparam_dict["max_pred_step"] = max_pred_step
+    length = amount_obs+max_pred_step
+
+    bpc = []
+    apc = []
+    bvc = []
+    avc = []
+    for i in range(max(1, level)):
+        bpc.append("bid_price_{}".format(i+1))
+        apc.append("ask_price_{}".format(i+1))
+        bvc.append("bid_amount_{}".format(i+1))
+        avc.append("ask_amount_{}".format(i+1))
+
+    df_raw.set_index("time", inplace=True)
+    df_raw = df_raw[bpc+apc+bvc+avc]
+    df_raw.drop_duplicates(keep="first", inplace=True)
+    df_raw.reset_index(inplace=True)
+    df_raw["time"] = pd.to_datetime(
+        df_raw["time"], format="%Y-%m-%d %H:%M:%S.%f", utc=True)
+    df_raw["time"] = df_raw["time"].apply(lambda x: x.timestamp())
+    if normalize:
+        price_mean = np.mean(df_raw[bpc+apc].values)
+        price_std = np.std(df_raw[bpc+apc].values)
+        vol_mean = np.mean(df_raw[bvc+avc].values)
+        vol_std = np.std(df_raw[bvc+avc].values)
+        df_raw[bpc+apc] = (df_raw[bpc+apc] - price_mean) / price_std
+        df_raw[bvc+avc] = (df_raw[bvc+avc] - vol_mean) / vol_std
+    else:
+        price_mean = 0.
+        price_std = 1.
+        vol_mean = 0.
+        vol_std = 1.
+    df_raw["mid_price"] = (df_raw[apc[0]] + df_raw[bpc[0]]) / 2
+    # dt = df_raw["time"].diff().min(skipna=True)
+    dt = df_raw["time"].diff().median(skipna=True)
+    hyperparam_dict["dt"] = dt
+    hyperparam_dict["price_mean"] = price_mean
+    hyperparam_dict["price_std"] = price_std
+    hyperparam_dict["vol_mean"] = vol_mean
+    hyperparam_dict["vol_std"] = vol_std
+
+    # make samples
+    # l = int(len(df_raw)/length)
+    l = int((len(df_raw)-length)/shift)+1
+    hyperparam_dict["nb_paths"] = l
+    cols = ["mid_price"]
+    if level > 0:
+        cols += bpc+apc
+        if use_volume:
+            cols += bvc+avc
+    dim = len(cols)
+    samples = np.zeros(shape=(l, dim, amount_obs))
+    times = np.zeros(shape=(l, amount_obs))
+    eval_samples = np.zeros(shape=(l, dim, max_pred_step))
+    eval_times = np.zeros(shape=(l, max_pred_step))
+
+    # split up data into samples
+    for i in range(l):
+        # df_ = df_raw.iloc[i*length:(i+1)*length, :]
+        df_ = df_raw.iloc[i*shift:i*shift+length, :]
+        df = df_.iloc[:amount_obs, :]
+        df_eval = df_.iloc[amount_obs:amount_obs+max_pred_step, :]
+        samples[i, :, :] = np.transpose(df[cols].values)
+        times[i, :] = df["time"].values - df["time"].values[0]
+        eval_samples[i, :, :] = np.transpose(df_eval[cols].values)
+        eval_times[i, :] = df_eval["time"].values - df["time"].values[0]
+
+    # generate labels
+    eval_labels = np.zeros(shape=(l, len(eval_predict_steps)))
+    thresholds = []
+    for i, k in enumerate(eval_predict_steps):
+        m_minus = np.mean(samples[:, 0, -k:]*price_std + price_mean, axis=1)
+        m_plus = np.mean(eval_samples[:, 0, :k]*price_std + price_mean, axis=1)
+        pctc = (m_plus - m_minus) / m_minus
+        threshold = np.quantile(pctc, q=2/3)
+        thresholds.append(threshold)
+        eval_labels[pctc > threshold, i] = 1
+        eval_labels[pctc < -threshold, i] = -1
+        print("steps ahead: ", k)
+        print("amount label 1: {}".format(np.sum(eval_labels[:, i] == 1)))
+        print("amount label 0: {}".format(np.sum(eval_labels[:, i] == 0)))
+        print("amount label -1: {}".format(np.sum(eval_labels[:, i] == -1)))
+    hyperparam_dict["thresholds"] = thresholds
+
+    # shift samples and eval samples s.t. they start at 0
+    if start_at_0:
+        eval_samples -= np.repeat(samples[:, :, 0:1], axis=2,
+                                  repeats=eval_samples.shape[2])
+        samples -= np.repeat(samples[:, :, 0:1], axis=2,
+                             repeats=samples.shape[2])
+
+    # save the dataset
+    time_id = 1
+    if len(df_overview) > 0:
+        time_id = np.max(df_overview["id"].values) + 1
+    file_name = '{}-{}'.format(model_name, time_id)
+    path = '{}{}/'.format(training_data_path, file_name)
+    desc = json.dumps(hyperparam_dict, sort_keys=True)
+    if os.path.exists(path):
+        print('Path already exists - abort')
+        raise ValueError
+    df_app = pd.DataFrame(
+        data=[[model_name, time_id, original_desc]],
+        columns=['name', 'id', 'description']
+    )
+    df_overview = pd.concat([df_overview, df_app],
+                            ignore_index=True)
+    df_overview.to_csv(data_overview)
+
+    os.makedirs(path)
+    with open('{}data.npy'.format(path), 'wb') as f:
+        np.save(f, samples)
+        np.save(f, times)
+        np.save(f, eval_samples)
+        np.save(f, eval_times)
+        np.save(f, eval_labels)
+    with open('{}metadata.txt'.format(path), 'w') as f:
+        json.dump(hyperparam_dict, f, sort_keys=True)
+
+    # stock_path dimension: [nb_paths, dimension, time_steps]
+    return path, time_id
+
+
+def get_rawLOB_dataset2(
+        hyperparam_dict=hyperparam_default,
+        seed=0):
+    raw_data_path = config.LOB_data_path2
+    makedirs(raw_data_path)
+    np.random.seed(seed=seed)
+    level = hyperparam_dict["LOB_level"]
+
+    # load raw data and preprocess
+    raw_data_dir = "{}{}.csv".format(
+        raw_data_path, hyperparam_dict["which_raw_data"])
+    if not os.path.exists(raw_data_dir):
+        print("raw LOB ({}) data not found -> dowloading ...".format(
+            hyperparam_dict["which_raw_data"]))
+        zip_file = wget.download(
+            "https://polybox.ethz.ch/index.php/s/JJ2eRMB3JmMTVzr/download",
+            training_data_path)
+        print("extracting zip ...")
+        with ZipFile(zip_file, 'r') as zipObj:
+            zipObj.extractall(path=training_data_path)
+        print("removing zip ...")
+        os.remove(zip_file)
+        print("download complete!")
+    df_raw = pd.read_csv(raw_data_dir, index_col=0)
+
+    for i in range(max(1, level)):
+        df_raw["bid_amount_{}".format(i+1)] = \
+            df_raw["bids_limit_notional_{}".format(i)]
+        df_raw["ask_amount_{}".format(i+1)] = \
+            df_raw["asks_limit_notional_{}".format(i)]
+        df_raw["bid_price_{}".format(i+1)] = \
+            df_raw["midpoint"] + \
+            df_raw["midpoint"]*df_raw["bids_distance_{}".format(i)]
+        df_raw["ask_price_{}".format(i+1)] = \
+            df_raw["midpoint"] + \
+            df_raw["midpoint"]*df_raw["asks_distance_{}".format(i)]
+    df_raw["time"] = df_raw["system_time"]
+
+    return df_raw
+
+
+def get_rawLOB_dataset1(
+        hyperparam_dict=hyperparam_default,
+        seed=0):
+    raw_data_path = config.LOB_data_path
+    np.random.seed(seed=seed)
+
+    # load raw data and preprocess
+    raw_data_dir = "{}sample.csv".format(raw_data_path)
+    if not os.path.exists(raw_data_dir):
+        print("raw LOB data not found -> dowloading ...")
+        zip_file = wget.download(
+            " >>> put here the link to a raw dataset <<< ",
+            training_data_path)
+        print("extracting zip ...")
+        with ZipFile(zip_file, 'r') as zipObj:
+            zipObj.extractall(path=training_data_path)
+        print("removing zip ...")
+        os.remove(zip_file)
+        print("download complete!")
+    df_raw = pd.read_csv(raw_data_dir)
+
+    return df_raw
+
 
 def _get_datasetname(time_id):
     df_overview, data_overview = get_dataset_overview()
@@ -246,20 +464,30 @@ def _get_time_id(stock_model_name="BlackScholes", time_id=None,
     """
     if time_id is None:
         df_overview, _ = get_dataset_overview(path)
-        if "FBM" in stock_model_name:
-            hurst = float(stock_model_name.split("h=")[1][:-1])
-            df_overview = df_overview.loc[
-                (df_overview["name"] == "FBM") &
-                (df_overview["description"].apply(
-                    lambda x: '"hurst": {}'.format(hurst) in x))]
-        else:
-            df_overview = df_overview.loc[
-                df_overview["name"] == stock_model_name]
+        df_overview = df_overview.loc[
+            df_overview["name"] == stock_model_name]
         if len(df_overview) > 0:
             time_id = np.max(df_overview["id"].values)
         else:
             time_id = None
     return time_id
+
+
+def _get_dataset_name_id_from_dict(data_dict):
+    if isinstance(data_dict, str):
+        data_dict = eval("config."+data_dict)
+    desc = json.dumps(data_dict, sort_keys=True)
+    df_overview, _ = get_dataset_overview()
+    which = df_overview.loc[df_overview["description"] == desc].index
+    if len(which) == 0:
+        ValueError("the given dataset does not exist yet, please generate it "
+                   "first using data_utils.py. \ndata_dict: {}".format(
+            data_dict))
+    elif len(which) > 1:
+        print("WARNING: multiple datasets match the description, returning the "
+              "last one. To uniquely identify the wanted dataset, please "
+              "provide the dataset_id instead of the data_dict.")
+    return list(df_overview.loc[which[-1], ["name", "id"]].values)
 
 
 def load_metadata(stock_model_name="BlackScholes", time_id=None):
@@ -284,6 +512,18 @@ def load_dataset(stock_model_name="BlackScholes", time_id=None):
     """
     time_id = _get_time_id(stock_model_name=stock_model_name, time_id=time_id)
     path = '{}{}-{}/'.format(training_data_path, stock_model_name, int(time_id))
+
+    if stock_model_name == "LOB":
+        with open('{}data.npy'.format(path), 'rb') as f:
+            samples = np.load(f)
+            times = np.load(f)
+            eval_samples = np.load(f)
+            eval_times = np.load(f)
+            eval_labels = np.load(f)
+        with open('{}metadata.txt'.format(path), 'r') as f:
+            hyperparam_dict = json.load(f)
+        return samples, times, eval_samples, eval_times, eval_labels, \
+               hyperparam_dict
 
     with open('{}data.npy'.format(path), 'rb') as f:
         stock_paths = np.load(f)
@@ -319,6 +559,38 @@ class IrregularDataset(Dataset):
         return {"idx": idx, "stock_path": self.stock_paths[idx], 
                 "observed_dates": self.observed_dates[idx], 
                 "nb_obs": self.nb_obs[idx], "dt": self.metadata['dt']}
+
+
+class LOBDataset(Dataset):
+    def __init__(self, time_id, idx=None):
+        samples, times, eval_samples, eval_times, eval_labels, \
+        hp_dict = load_dataset(
+            stock_model_name="LOB", time_id=time_id)
+        if idx is None:
+            idx = np.arange(len(samples))
+        self.metadata = hp_dict
+        self.samples = samples[idx]
+        self.times = times[idx]
+        self.eval_samples = eval_samples[idx]
+        self.eval_times = eval_times[idx]
+        self.eval_labels = eval_labels[idx]
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        if type(idx) == int:
+            idx = [idx]
+        # stock_path dimension: [BATCH_SIZE, DIMENSION, TIME_STEPS]
+        return {"idx": idx, "samples": self.samples[idx],
+                "times": self.times[idx],
+                "eval_samples": self.eval_samples[idx],
+                "eval_times": self.eval_times[idx],
+                "eval_labels": self.eval_labels[idx],
+                "amount_obs": self.metadata["amount_obs"],
+                "eval_predict_steps": self.metadata["eval_predict_steps"],
+                "max_pred_step": self.metadata["max_pred_step"],
+                "dt": self.metadata['dt']}
 
 
 def _get_func(name):
@@ -432,13 +704,142 @@ def CustomCollateFnGen(func_names=None):
         res = {'times': np.array(times), 'time_ptr': np.array(time_ptr),
                'obs_idx': torch.tensor(obs_idx, dtype=torch.long),
                'start_X': start_X, 'n_obs_ot': nb_obs,
-               'X': torch.tensor(X, dtype=torch.float32),
+               'X': torch.tensor(np.array(X), dtype=torch.float32),
                'true_paths': stock_paths, 'observed_dates': observed_dates,
                'true_mask': mask,
                'M': M, 'start_M': start_M}
         return res
 
     return custom_collate_fn, mult
+
+
+def LOBCollateFnGen(data_type="train", use_eval_on_train=True,
+                    train_classifier=False):
+    """
+    a function to get the costume collate function that can be used in
+    torch.DataLoader with the wanted functions applied to the data as new
+    dimensions
+    -> the functions are applied on the fly to the dataset, and this additional
+    data doesn't have to be saved
+
+    :param data_type: one of {"train", "test"}
+    :param use_eval_on_train: bool, whether to use the eval parts of the samples
+    :param train_classifier: bool, whether a classifier is trained
+
+    :return: collate function
+    """
+
+    def custom_collate_fn(batch):
+        amount_obs = batch[0]['amount_obs']
+        eval_predict_steps = batch[0]['eval_predict_steps']
+        max_pred_step = batch[0]['max_pred_step']
+        samples = np.concatenate([b['samples'] for b in batch], axis=0)
+        times = np.concatenate([b['times'] for b in batch], axis=0)
+        eval_samples = np.concatenate([b['eval_samples'] for b in batch],axis=0)
+        eval_times = np.concatenate([b['eval_times'] for b in batch], axis=0)
+        eval_labels = np.concatenate([b['eval_labels'] for b in batch], axis=0)
+
+        if data_type == "train":
+            if use_eval_on_train and not train_classifier:
+                samples = np.concatenate([samples, eval_samples], axis=2)
+                times = np.concatenate([times, eval_times], axis=1)
+                nb_obs = amount_obs+max_pred_step
+                predict_times = None
+                predict_vals = None
+                predict_labels = None
+            else:
+                nb_obs = amount_obs
+                pred_indices = [x-1 for x in eval_predict_steps]
+                predict_times = eval_times[:, pred_indices]
+                predict_vals = eval_samples[:, :, pred_indices]
+                predict_labels = torch.tensor(eval_labels+1, dtype=torch.long)
+            max_time = np.max(times[:, -1])
+        else:
+            nb_obs = amount_obs
+            pred_indices = [x-1 for x in eval_predict_steps]
+            predict_times = eval_times[:, pred_indices]
+            predict_vals = eval_samples[:, :, pred_indices]
+            predict_labels = torch.tensor(eval_labels+1, dtype=torch.long)
+            max_time = np.max(predict_times[:, -1])
+
+        start_X = torch.tensor(samples[:, :, 0], dtype=torch.float32)
+        X = []
+        time_ptr = [0]
+        obs_idx = []
+        counter = 0
+        all_times = []
+        curr_times = copy.deepcopy(times[:, 1])
+        curr_time_ptr = np.ones_like(curr_times)
+
+        ti = time.time()
+        while np.any(curr_time_ptr < nb_obs):
+            next_t = np.min(curr_times)
+            all_times.append(next_t)
+            which = curr_times == next_t
+            for i, w in enumerate(which):
+                if w == 1:
+                    counter += 1
+                    X.append(samples[i, :, int(curr_time_ptr[i])])
+                    obs_idx.append(i)
+                    curr_time_ptr[i] += 1
+                    if curr_time_ptr[i] < nb_obs:
+                        curr_times[i] = times[i, int(curr_time_ptr[i])]
+                    else:
+                        curr_times[i] = np.infty
+            time_ptr.append(counter)
+        # print("collate time: {}".format(time.time()-ti))
+
+        assert len(obs_idx) == (nb_obs-1)*samples.shape[0]
+        # predict_labels has values in {0,1,2} (which represent {-1,0,1})
+        res = {'times': np.array(all_times), 'time_ptr': np.array(time_ptr),
+               'obs_idx': torch.tensor(obs_idx, dtype=torch.long),
+               'start_X': start_X,
+               'n_obs_ot': torch.ones(size=(start_X.shape[0],))*nb_obs,
+               'X': torch.tensor(np.array(X), dtype=torch.float32),
+               'true_samples': samples, 'true_times': times,
+               'true_eval_samples': eval_samples, 'true_eval_times': eval_times,
+               'true_eval_labels': eval_labels,
+               'predict_times': predict_times, 'predict_vals': predict_vals,
+               'predict_labels': predict_labels,
+               'max_time': max_time, 'coord_to_compare': [0],
+               'true_mask': None, 'M': None, 'start_M': None}
+        return res
+
+    return custom_collate_fn
+
+
+def LOBCollateFnGen2():
+    """
+    a function to get the costume collate function that can be used in
+    torch.DataLoader with the wanted functions applied to the data as new
+    dimensions
+    -> the functions are applied on the fly to the dataset, and this additional
+    data doesn't have to be saved
+
+    :return: collate function
+    """
+
+    def custom_collate_fn(batch):
+        amount_obs = batch[0]['amount_obs']
+        eval_predict_steps = batch[0]['eval_predict_steps']
+        max_pred_step = batch[0]['max_pred_step']
+        samples = np.concatenate([b['samples'] for b in batch], axis=0)
+        samples = np.transpose(samples[:, 1:, :], axes=(0, 2, 1))
+        samples = np.expand_dims(samples, axis=1)
+        times = np.concatenate([b['times'] for b in batch], axis=0)
+        eval_samples = np.concatenate([b['eval_samples'] for b in batch],axis=0)
+        eval_times = np.concatenate([b['eval_times'] for b in batch], axis=0)
+        eval_labels = np.concatenate([b['eval_labels'] for b in batch], axis=0)
+
+        predict_labels = torch.tensor(eval_labels+1, dtype=torch.long)
+
+        res = {'samples': torch.tensor(samples),
+               'true_labels': eval_labels,
+               'labels': predict_labels,
+               }
+        return res
+
+    return custom_collate_fn
 
 
 def main(arg):
@@ -461,6 +862,8 @@ def main(arg):
         create_combined_dataset(
             stock_model_names=smn, hyperparam_dicts=dataset_params,
             seed=FLAGS.seed)
+    elif "LOB" in dataset_name:
+        create_LOB_dataset(hyperparam_dict=dataset_params, seed=FLAGS.seed)
     else:
         create_dataset(
             stock_model_name=dataset_name, hyperparam_dict=dataset_params,

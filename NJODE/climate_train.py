@@ -89,7 +89,7 @@ def train(
         ode_nn=default_ode_nn, readout_nn=default_readout_nn,
         enc_nn=default_enc_nn, use_rnn=False,
         solver="euler", weight=0.5, weight_decay=1.,
-        data_index=0, dataset='climate',
+        data_index=0,
         saved_models_path=saved_models_path,
         **options
 ):
@@ -420,8 +420,6 @@ def train(
         initial_print += '\n\nmodel overview:'
         print(initial_print)
         print(model, '\n')
-
-        # TODO: check code -  go on here - change chat id in other sends
 
         # compute number of parameters
         nr_params = 0
