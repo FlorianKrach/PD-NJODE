@@ -3,7 +3,6 @@ author: Florian Krach
 """
 
 # =====================================================================================================================
-from typing import List
 
 import torch  # machine learning
 import tqdm  # process bar for iterations
@@ -16,13 +15,12 @@ import pandas as pd  # data analysis and manipulation
 import json  # storing and exchanging data
 import time
 import socket
-import matplotlib  # plots
 import matplotlib.colors
 from torch.backends import cudnn
 import gc
 import sklearn
 
-import config
+from configs import config
 import models
 import data_utils
 sys.path.append("../")
@@ -30,7 +28,7 @@ sys.path.append("../")
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -44,7 +42,6 @@ else:
     N_CPUS = 1
     SEND = True
     matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 print(socket.gethostname())
 print('SERVER={}'.format(SERVER))
 

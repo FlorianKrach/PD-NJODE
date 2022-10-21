@@ -3,47 +3,10 @@ author: Florian Krach
 
 This file contains all configs to run the experiments from the first paper
 """
-import os
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import ParameterGrid
-import socket
 
-# ==============================================================================
-# Global variables
-data_path = '../data/'
-training_data_path = '{}training_data/'.format(data_path)
-
-
-# ==============================================================================
-# FUNCTIONS
-def get_parameter_array(param_dict):
-    """
-    helper function to get a list of parameter-list with all combinations of
-    parameters specified in a parameter-dict
-
-    :param param_dict: dict with parameters
-    :return: 2d-array with the parameter combinations
-    """
-    param_combs_dict_list = list(ParameterGrid(param_dict))
-    return param_combs_dict_list
-
-
-def get_dataset_overview(training_data_path=training_data_path):
-    data_overview = '{}dataset_overview.csv'.format(
-        training_data_path)
-    makedirs(training_data_path)
-    if not os.path.exists(data_overview):
-        df_overview = pd.DataFrame(
-            data=None, columns=['name', 'id', 'description'])
-    else:
-        df_overview = pd.read_csv(data_overview, index_col=0)
-    return df_overview, data_overview
-
-
-def makedirs(dirname):
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
+from configs.config_utils import get_parameter_array, get_dataset_overview, \
+    makedirs, data_path, training_data_path
 
 
 

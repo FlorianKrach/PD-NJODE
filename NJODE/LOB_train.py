@@ -21,7 +21,7 @@ from torch.backends import cudnn
 import gc
 import sklearn
 
-import config
+from configs import config
 import models
 import data_utils
 sys.path.append("../")
@@ -29,7 +29,7 @@ sys.path.append("../")
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================

@@ -12,6 +12,7 @@ import sys
 import iisignature as sig
 import copy as copy
 import sklearn
+import scipy.linalg
 
 import data_utils
 
@@ -187,6 +188,8 @@ def get_ffnn(input_size, output_size, nn_desc, dropout_rate, bias):
     :param bias: bool, whether a bias is used in the layers
     :return: torch.nn.Sequential, the NN function
     """
+    if nn_desc is not None and len(nn_desc) == 0:
+        return torch.nn.Identity()
     if nn_desc is None:
         layers = [torch.nn.Linear(in_features=input_size, out_features=output_size, bias=bias)]  # take linear NN if
         # not specified otherwise
@@ -215,11 +218,17 @@ class ODEFunc(torch.nn.Module):
 
     def __init__(self, input_size, hidden_size, ode_nn, dropout_rate=0.0,
                  bias=True, input_current_t=False, input_sig=False,
-                 sig_depth=3, coord_wise_tau=False):
+                 sig_depth=3, coord_wise_tau=False, input_scaling_func="tanh"):
         super().__init__()  # initialize class with given parameters
         self.input_current_t = input_current_t
         self.input_sig = input_sig
         self.sig_depth = sig_depth
+        if input_scaling_func in ["id", "identity"]:
+            self.sc_fun = torch.nn.Identity()
+            print("neuralODE use input scaling with identity (no scaling)")
+        else:
+            self.sc_fun = torch.tanh
+            print("neuralODE use input scaling with tanh")
 
         # create feed-forward NN, f(H,X,tau,t-tau)
         if coord_wise_tau:
@@ -244,21 +253,20 @@ class ODEFunc(torch.nn.Module):
         if self.input_current_t:
             if self.input_sig:
                 input_f = torch.cat(
-                    [torch.tanh(x), torch.tanh(h), tau, tdiff, tau + tdiff, signature], dim=1
-                )
+                    [self.sc_fun(x), self.sc_fun(h), tau, tdiff, tau + tdiff,
+                     signature], dim=1)
             else:
                 input_f = torch.cat(
-                    [torch.tanh(x), torch.tanh(h), tau, tdiff, tau + tdiff], dim=1
-                )
+                    [self.sc_fun(x), self.sc_fun(h), tau, tdiff,
+                     tau + tdiff], dim=1)
         else:
             if self.input_sig:
                 input_f = torch.cat(
-                    [torch.tanh(x), torch.tanh(h), tau, tdiff, signature], dim=1
-                )
+                    [self.sc_fun(x), self.sc_fun(h), tau, tdiff, signature],
+                    dim=1)
             else:
                 input_f = torch.cat(
-                    [torch.tanh(x), torch.tanh(h), tau, tdiff], dim=1
-                )
+                    [self.sc_fun(x), self.sc_fun(h), tau, tdiff], dim=1)
         df = self.f(input_f)
         return df
 
@@ -291,13 +299,20 @@ class FFNN(torch.nn.Module):
 
     def __init__(self, input_size, output_size, nn_desc, dropout_rate=0.0,
                  bias=True, residual=False, masked=False, recurrent=False,
-                 input_sig=False, sig_depth=3, **kwargs):
+                 input_sig=False, sig_depth=3, clamp=None, input_t=False,
+                 t_size=None,
+                 **kwargs):
         super().__init__()
 
+        self.use_lstm = False
+        if nn_desc is not None and isinstance(nn_desc[0][0], str) \
+                and nn_desc[0][0].lower() == "lstm":
+            self.use_lstm = True
+            print("USE LSTM")
         in_size = input_size
         if masked:
             in_size = 2 * input_size
-        if recurrent:
+        if recurrent and not self.use_lstm:
             in_size += output_size
         if input_sig:
             in_size += sig_depth
@@ -306,11 +321,25 @@ class FFNN(torch.nn.Module):
         self.output_size = output_size
         self.input_sig = input_sig
         self.sig_depth = sig_depth
+        self.input_t = input_t
+        if self.input_t:
+            in_size += t_size
+        self.clamp = clamp
+        self.lstm = None
+        if self.use_lstm:
+            self.lstm = torch.nn.LSTMCell(
+                input_size=in_size, hidden_size=nn_desc[0][1], bias=bias)
+            self.c_h = None
+            in_size = nn_desc[0][1]*2
+            assert in_size == output_size, \
+                "when using an LSTM, the hidden_size has to be 2* " \
+                "the LSTM output size"
+            nn_desc = nn_desc[1:]
         self.ffnn = get_ffnn(
             input_size=in_size, output_size=output_size,
             nn_desc=nn_desc, dropout_rate=dropout_rate, bias=bias)
 
-        if residual and not self.recurrent:
+        if residual and not self.recurrent and not self.use_lstm:
             print('use residual network: input_size={}, output_size={}'.format(
                 input_size, output_size))
             if input_size <= output_size:
@@ -320,21 +349,30 @@ class FFNN(torch.nn.Module):
         else:
             self.case = 0
 
-    def forward(self, nn_input, mask=None, sig=None, h=None):
-        if self.recurrent:
+    def forward(self, nn_input, mask=None, sig=None, h=None, t=None):
+        if self.recurrent or self.use_lstm:
             assert h is not None
             # x = torch.tanh(nn_input)
             x = nn_input
-            x = torch.cat((x, h), dim=1)
+            if not self.use_lstm:
+                x = torch.cat((x, h), dim=1)
+            if self.input_t:
+                x = torch.cat((x, t), dim=1)
             if self.masked:
                 assert mask is not None
                 x = torch.cat((x, mask), dim=1)
             if self.input_sig:
                 assert sig is not None
                 x = torch.cat((x, sig), dim=1)
+            if self.use_lstm:
+                h_, c_ = torch.chunk(h, chunks=2, dim=1)
+                h_, c_ = self.lstm(x.float(), (h_, c_))
+                x = torch.concat((h_, c_), dim=1)
             return self.ffnn(x.float())
 
         x = torch.tanh(nn_input)    # maybe not helpful
+        if self.input_t:
+            x = torch.cat((x, t), dim=1)
         if self.masked:
             assert mask is not None
             x = torch.cat((x, mask), dim=1)
@@ -344,14 +382,18 @@ class FFNN(torch.nn.Module):
         out = self.ffnn(x.float())
 
         if self.case == 0:
-            return out
+            pass
         elif self.case == 1:
             identity = torch.zeros((nn_input.shape[0], self.output_size))
             identity[:, 0:nn_input.shape[1]] = nn_input
-            return identity + out
+            out = identity + out
         elif self.case == 2:
             identity = nn_input[:, 0:self.output_size]
-            return identity + out
+            out = identity + out
+
+        if self.clamp is not None:
+            out = torch.clamp(out, min=-self.clamp, max=self.clamp)
+        return out
 
 
 class NJODE(torch.nn.Module):
@@ -389,7 +431,7 @@ class NJODE(torch.nn.Module):
                 - "options" with arg a dict passed
                     from train.train (kwords: 'which_loss', 'residual_enc_dec',
                     'masked', 'input_current_t', 'input_sig', 'level',
-                    'use_y_for_ode' are used)
+                    'use_y_for_ode', 'enc_input_t' are used)
         """
         super().__init__()  # super refers to base class, init initializes
 
@@ -430,6 +472,15 @@ class NJODE(torch.nn.Module):
         self.coord_wise_tau = False
         if 'coord_wise_tau' in options1 and self.masked:
             self.coord_wise_tau = options1['coord_wise_tau']
+        self.enc_input_t = False
+        if 'enc_input_t' in options1:
+            self.enc_input_t = options1['enc_input_t']
+        self.clamp = None
+        if 'clamp' in options1:
+            self.clamp = options1['clamp']
+        self.ode_input_scaling_func = "tanh"
+        if 'ode_input_scaling_func' in options1:
+            self.ode_input_scaling_func = options1['ode_input_scaling_func']
         classifier_dict = None
         if 'classifier_dict' in options:
             classifier_dict = options["classifier_dict"]
@@ -445,21 +496,26 @@ class NJODE(torch.nn.Module):
                 self.loss_weight = 0.
             else:
                 self.class_loss_weight = class_loss_weight
+        t_size = 2
+        if self.coord_wise_tau:
+            t_size = 2*input_size
 
         self.ode_f = ODEFunc(
             input_size=input_size, hidden_size=hidden_size, ode_nn=ode_nn,
             dropout_rate=dropout_rate, bias=bias,
             input_current_t=self.input_current_t, input_sig=self.input_sig,
-            sig_depth=self.sig_depth, coord_wise_tau=self.coord_wise_tau)
+            sig_depth=self.sig_depth, coord_wise_tau=self.coord_wise_tau,
+            input_scaling_func=self.ode_input_scaling_func)
         self.encoder_map = FFNN(
             input_size=input_size, output_size=hidden_size, nn_desc=enc_nn,
             dropout_rate=dropout_rate, bias=bias, recurrent=self.use_rnn,
             masked=self.masked, residual=self.residual_enc_dec,
-            input_sig=self.input_sig, sig_depth=self.sig_depth)
+            input_sig=self.input_sig, sig_depth=self.sig_depth,
+            input_t=self.enc_input_t, t_size=t_size)
         self.readout_map = FFNN(
             input_size=hidden_size, output_size=output_size, nn_desc=readout_nn,
             dropout_rate=dropout_rate, bias=bias,
-            residual=self.residual_enc_dec)
+            residual=self.residual_enc_dec, clamp=self.clamp)
         self.get_classifier(classifier_dict=classifier_dict)
 
         self.solver = solver
@@ -647,7 +703,10 @@ class NJODE(torch.nn.Module):
 
         h = self.encoder_map(
             start_X, mask=start_M, sig=c_sig,
-            h=torch.zeros((batch_size, self.hidden_size)))
+            h=torch.zeros((batch_size, self.hidden_size)),
+            t=torch.cat((tau, current_time - tau), dim=1))
+        # if self.encoder_map.use_lstm:
+        #     self.c_ = torch.chunk(h.clone(), chunks=2, dim=1)[1]
 
         if return_path:
             path_t = [0]
@@ -710,9 +769,14 @@ class NJODE(torch.nn.Module):
             c_sig_iobs = None
             if self.input_sig:
                 c_sig_iobs = c_sig[i_obs]
+            # if self.encoder_map.use_lstm:
+            #     h[:, self.hidden_size//2:] = self.c_
             temp[i_obs.long()] = self.encoder_map(
-                X_obs_impute, mask=M_obs, sig=c_sig_iobs, h=h[i_obs])
+                X_obs_impute, mask=M_obs, sig=c_sig_iobs, h=h[i_obs],
+                t=torch.cat((tau[i_obs], current_time - tau[i_obs]), dim=1))
             h = temp
+            # if self.encoder_map.use_lstm:
+            #     self.c_ = torch.chunk(h.clone(), chunks=2, dim=1)[1]
             Y = self.readout_map(h)
 
             # update h and sig at last observation

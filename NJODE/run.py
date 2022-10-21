@@ -5,33 +5,24 @@ code for running the experiments
 """
 
 # =====================================================================================================================
-import argparse
 import numpy as np
-import os, sys
+import os
 import pandas as pd
 import json
 import socket
 import matplotlib
-import copy
-from sklearn.model_selection import ParameterGrid
 from joblib import Parallel, delayed
 from absl import app
 from absl import flags
 
-import config
+from configs import config
 import extras
-import data_utils
-import train
-import climate_train
-import physionet_train
-import LOB_train
-import retrain_LOB_classifier
 from train_switcher import train_switcher
 
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -104,7 +95,7 @@ def get_parameter_array(param_dict):
 
 
 def parallel_training(params=None, model_ids=None, nb_jobs=1, first_id=None,
-                      saved_models_path=train.saved_models_path,
+                      saved_models_path=config.saved_models_path,
                       overwrite_params=None):
     """
     function for parallel training, based on train.train
@@ -139,7 +130,7 @@ def parallel_training(params=None, model_ids=None, nb_jobs=1, first_id=None,
         saved_models_path = params[0]['saved_models_path']
     model_overview_file_name = '{}model_overview.csv'.format(
         saved_models_path)
-    train.makedirs(saved_models_path)
+    config.makedirs(saved_models_path)
     if not os.path.exists(model_overview_file_name):
         df_overview = pd.DataFrame(data=None, columns=['id', 'description'])
         max_id = 0

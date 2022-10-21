@@ -11,23 +11,19 @@ import torch
 import argparse
 import tqdm
 import numpy as np
-from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
 import os
 import sys
 import pandas as pd
 import json
 import time
 import socket
-import matplotlib
 import matplotlib.colors
 from torch.backends import cudnn
 import gc
 
 sys.path.append("../")
-import config
+from configs import config
 import models
-import data_utils
 import latent_ODE.parse_datasets_LODE as parse_dataset
 import latent_ODE.likelihood_eval_LODE as likelihood_eval
 
@@ -35,7 +31,7 @@ import latent_ODE.likelihood_eval_LODE as likelihood_eval
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 # =====================================================================================================================
 # check whether running on computer or server
@@ -48,7 +44,6 @@ else:
     N_CPUS = 1
     SEND = True
     matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 print(socket.gethostname())
 print('SERVER={}'.format(SERVER))
 

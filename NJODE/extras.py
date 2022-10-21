@@ -9,21 +9,18 @@ import pandas as pd
 import numpy as np
 import pdf2image
 import imageio
-import os, sys, time
+import os
 import json
 import socket
-import matplotlib
 import matplotlib.colors
-from absl import flags
 
-import config
-import train
+from configs import config
 from train_switcher import train_switcher
 
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 if 'ada-' not in socket.gethostname():
     SERVER = False

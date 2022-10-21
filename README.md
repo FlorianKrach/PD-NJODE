@@ -9,12 +9,11 @@ but was developed further such that it is more user-friendly.
 All experiments from the first part can be run with this repo as well (see 
 [Instructions for NJODE](#instructions-for-running-experiments-of-neural-jump-ordinary-differential-equations)).
 
-
 ## Requirements
 
 This code was executed using Python 3.7.
 
-To install requirements, download this Repo and cd into it. 
+To install requirements, download this Repo and cd into it.
 
 Then create a new environment and install all dependencies and this repo.
 With [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html):
@@ -24,12 +23,15 @@ conda activate njode
 pip install -r requirements.txt
 ```
 
+
 ## Dataset Generation
 go to the source directory:
 ```sh
 cd NJODE
 ```
 
+
+### Synthetic Datasets
 generate Poisson Point Process dataset:
 ```sh
 python data_utils.py --dataset_name=PoissonPointProcess --dataset_params=poisson_pp_dict
@@ -61,9 +63,34 @@ generate BS with dependent observation intensity dataset:
 python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_dep_intensity_dict
 ```
 
-generate Limit Order Book (LOB) dataset with raw data from Covario 
-(**ATTENTION**: the needed raw data was provided by Covario but is not publicly 
-available, hence this data generation will raise an error, unless you provide a 
+generate double-pendulum (deterministic chaotic system) dataset:
+```sh
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict1
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict2
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict3
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict3_test --seed=3
+```
+
+generate BM Filtering Problem dataset:
+```sh
+python data_utils.py --dataset_name=BMFiltering --dataset_params=BM_Filter_dict
+python data_utils.py --dataset_name=BMFiltering --dataset_params=BM_Filter_dict_1
+python data_utils.py --dataset_name=BMFiltering --dataset_params=BM_Filter_dict_testdata
+```
+
+generate BM TimeLag dataset:
+```sh
+python data_utils.py --dataset_name=BMwithTimeLag --dataset_params=BM_TimeLag_dict_1 --seed=3
+python data_utils.py --dataset_name=BMwithTimeLag --dataset_params=BM_TimeLag_dict_2 --seed=3
+python data_utils.py --dataset_name=BMwithTimeLag --dataset_params=BM_TimeLag_dict_testdata
+```
+
+
+
+### Real World Datasets
+generate Limit Order Book (LOB) dataset with raw data from Covario
+(**ATTENTION**: the needed raw data was provided by Covario but is not publicly
+available, hence this data generation will raise an error, unless you provide a
 working link to raw data):
 ```sh
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict1
@@ -87,11 +114,13 @@ python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_6_2
 ```
 
 
-**REMARK**: the physionet and climate datasets are automatically downloaded when 
-training a model on them for the first time (=> do not train multiple models at 
-parallel at first time, since otherwise each will start the download and 
-overwrite each others output. after download is complete, parallel training can 
+**REMARK**: the physionet and climate datasets are automatically downloaded when
+training a model on them for the first time (=> do not train multiple models at
+parallel at first time, since otherwise each will start the download and
+overwrite each others output. after download is complete, parallel training can
 be used normally!)
+
+
 
 
 ## Training & Testing
@@ -124,6 +153,7 @@ List of all flags:
 - **plot_conv_study**: name of the dict (in config.py) defining input for extras.plot_convergence_study
 
 
+### Synthetic Datasets
 train model on Poisson Point Process:
 ```sh
 python run.py --params=param_list_poissonpp1 --NB_JOBS=1 --NB_CPUS=1 --first_id=1
@@ -139,7 +169,7 @@ python run.py --plot_paths=plot_paths_FBM_dict
 train model on BM2DCorr:
 ```sh
 python run.py --params=param_list_BM2D_1 --NB_JOBS=1 --NB_CPUS=1 --first_id=1  --get_overview=overview_dict_BM2D_1
-python run.py --plot_paths=plot_paths_BMV2D_dict
+python run.py --plot_paths=plot_paths_BM2D_dict
 ```
 
 train model on BMandVar:
@@ -154,6 +184,29 @@ python run.py --params=param_list_DepIntensity_1 --NB_JOBS=24 --NB_CPUS=1 --firs
 python run.py --plot_paths=plot_paths_DepIntensity_dict
 ```
 
+train PD-NJODE on DoublePendulum:
+```shell
+python run.py --params=param_list_DP --NB_JOBS=40 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_DP
+python run.py --plot_paths=plot_paths_DP_dict
+python run.py --params=param_list_DP --NB_JOBS=40 --saved_models_path="../data/saved_models_DoublePendulum/" --overwrite_params="{'test_data_dict': 'DP_dict3_test'}"
+python run.py --plot_paths=plot_paths_DP_dict
+```
+
+train model on BM Filtering Problem dataset:
+```sh
+python run.py --params=param_list_BMFilter_1 --NB_JOBS=8 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_BMFilter_1
+python run.py --plot_paths=plot_paths_BMFilter_dict
+```
+
+train model on BM with TimeLag dataset:
+```sh
+python run.py --params=param_list_BMTimeLag --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_BMTimeLag
+python run.py --plot_paths=plot_paths_BMTimeLag_dict
+```
+
+
+
+### Real World Datasets
 train model on PhysioNet datasets:
 ```sh
 python run.py --params=param_list_physio --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_physio --crossval=crossval_dict_physio
@@ -235,6 +288,7 @@ url={https://openreview.net/forum?id=JFKR3WqwyXR}
 ```
 
 
+
 ## Acknowledgements and References
 This code is based on the code-repo of the first paper [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR):
 https://github.com/HerreraKrachTeichmann/NJODE  
@@ -252,6 +306,9 @@ The other bitcoin LOB dataset was gratefully provided by Covario, but is not pub
 
 The GIFs of the training progress were generated with imageio:
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3674137.svg)](https://doi.org/10.5281/zenodo.3674137)
+
+
+
 
 
 --------------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import climate_train
 import physionet_train
 import LOB_train
 import retrain_LOB_classifier
+import synthetic_datasets
 
 
 def train_switcher(**params):
@@ -23,14 +24,10 @@ def train_switcher(**params):
         else:
             data_dict = params["data_dict"]
             if isinstance(data_dict, str):
-                import config
+                from configs import config
                 data_dict = eval("config."+data_dict)
             params["dataset"] = data_dict["model_name"]
-    if params['dataset'] in [
-        "BlackScholes", "Heston", "OrnsteinUhlenbeck", "HestonWOFeller",
-        "PoissonPointProcess", "FBM", "BM2DCorr", "BMandVar", "BM",
-        "sine_BlackScholes", "sine_Heston", "sine_OrnsteinUhlenbeck",
-        "SP500",] or \
+    if params['dataset'] in list(synthetic_datasets.DATASETS) or \
             'combined' in params['dataset'] or 'FBM[' in params['dataset']:
         return train.train(**params)
     elif params['dataset'] in ['climate', 'Climate']:

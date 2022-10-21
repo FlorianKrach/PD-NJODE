@@ -4,16 +4,17 @@ author: Florian Krach
 
 import numpy as np  # large arrays and matrices, functions
 from sklearn.model_selection import train_test_split
-import os, sys
+import sys
 import sklearn.linear_model as lm
 
 import data_utils
+from configs import config
 sys.path.append("../")
 
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 def train_linreg(data_dict, use_midprice_only=True, last_x_times=None,

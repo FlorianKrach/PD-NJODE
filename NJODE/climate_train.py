@@ -12,22 +12,19 @@ import torch
 import tqdm
 import numpy as np
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
 import os, sys
 import pandas as pd
 import json
 import time
 import socket
-import matplotlib
 import matplotlib.colors
 from torch.backends import cudnn
 import gc
 import wget
 from zipfile import ZipFile
 
-import config
+from configs import config
 import models
-import data_utils
 sys.path.append("../")
 import GRU_ODE_Bayes.data_utils_gru_ode_bayes as data_utils_gru
 import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
@@ -36,7 +33,7 @@ import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -53,8 +50,6 @@ SEND = False
 if SERVER:
     SEND = False
     matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-
 
 # =====================================================================================================================
 # Global variables

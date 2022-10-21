@@ -8,6 +8,7 @@ implementation of the training (and evaluation) of NJ-ODE
 from typing import List
 
 import torch  # machine learning
+import torch.nn as nn
 import tqdm  # process bar for iterations
 import numpy as np  # large arrays and matrices, functions
 from torch.utils.data import DataLoader
@@ -22,7 +23,7 @@ import matplotlib.colors
 from torch.backends import cudnn
 import gc
 
-import config
+from configs import config
 import models
 import data_utils
 sys.path.append("../")
@@ -31,7 +32,7 @@ import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -59,8 +60,9 @@ data_path = config.data_path
 saved_models_path = config.saved_models_path
 flagfile = config.flagfile
 
-METR_COLUMNS: List[str] = ['epoch', 'train_time', 'eval_time', 'train_loss', 'eval_loss',
-                           'optimal_eval_loss']
+METR_COLUMNS: List[str] = [
+    'epoch', 'train_time', 'eval_time', 'train_loss', 'eval_loss',
+    'optimal_eval_loss']
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
 default_enc_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -140,6 +142,9 @@ def train(
             plotted
     :param saved_models_path: str, where to save the models
     :param options: kwargs, used keywords:
+            'test_data_dict'    None, str or dict, if no None, this data_dict is
+                            used to define the dataset for testing and
+                            evaluation
             'func_appl_X'   list of functions (as str, see data_utils)
                             to apply to X
             'masked'        bool, whether the data is masked (i.e. has
@@ -165,7 +170,11 @@ def train(
             'input_sig'     bool, whether to use the signature as input
             'level'         int, level of the signature that is used
             'input_current_t'   bool, whether to additionally input current time
-                            to the ODE function f
+                            to the ODE function f, default: False
+            'enc_input_t'   bool, whether to use the time as input for the
+                            encoder network. default: False
+            'train_readout_only'    bool, whether to only train the readout
+                            network
             'training_size' int, if given and smaller than
                             dataset_size*(1-test_size), then this is the umber
                             of samples used for the training set (randomly
@@ -177,12 +186,18 @@ def train(
             'load_best'     bool, whether to load the best checkpoint instead of
                             the last checkpoint when loading the model. Mainly
                             used for evaluating model at the best checkpoint.
-            'other_model'   one of {'GRU_ODE_Bayes'}; the specifieed model is
-                            trained instead of the controlled ODE-RNN model.
+            'gradient_clip' float, if provided, then gradient values are clipped
+                            by the given value
+            'clamp'         float, if provided, then output of model is clamped
+                            to +/- the given value
+            'other_model'   one of {'GRU_ODE_Bayes', randomizedNJODE};
+                            the specifieed model is trained instead of the
+                            controlled ODE-RNN model.
                             Other options/inputs might change or loose their
-                            effect. The saved_models_path is changed to
-                            "{...}<model-name>-saved_models/" instead of
-                            "{...}saved_models/".
+                            effect.
+            'ode_input_scaling_func'    None or str in {'id', 'tanh'}, the
+                            function used to scale inputs to the neuralODE.
+                            default: tanh
                 -> 'GRU_ODE_Bayes' has the following extra options with the
                     names 'GRU_ODE_Bayes'+<option_name>, for the following list
                     of possible choices for <options_name>:
@@ -292,6 +307,15 @@ def train(
         model_name=dataset, time_id=dataset_id, idx=train_idx)
     data_val = data_utils.IrregularDataset(
         model_name=dataset, time_id=dataset_id, idx=val_idx)
+    test_data_dict = None
+    if 'test_data_dict' in options:
+        test_data_dict = options['test_data_dict']
+    if test_data_dict is not None:
+        test_ds, test_ds_id = data_utils._get_dataset_name_id_from_dict(
+            data_dict=test_data_dict)
+        test_ds_id = int(test_ds_id)
+        data_val = data_utils.IrregularDataset(
+            model_name=test_ds, time_id=test_ds_id, idx=None)
 
     # get data-loader for training
     if 'func_appl_X' in options:  # list of functions to apply to the paths in X
@@ -455,6 +479,9 @@ def train(
     model.to(device)  # pass model to CPU/GPU
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
                                  weight_decay=0.0005)
+    gradient_clip = None
+    if 'gradient_clip' in options:
+        gradient_clip = options["gradient_clip"]
 
     # load saved model if wanted/possible
     best_eval_loss = np.infty
@@ -543,6 +570,13 @@ def train(
             if not skip:
                 nr_params += param.nelement()  # count number of parameters
         print('# parameters={}\n'.format(nr_params))
+
+        # compute number of trainable params
+        nr_trainable_params = 0
+        for pg in optimizer.param_groups:
+            for p in pg['params']:
+                nr_trainable_params += p.nelement()
+        print('# trainable parameters={}\n'.format(nr_trainable_params))
         print('start training ...')
 
     metric_app = []
@@ -579,7 +613,12 @@ def train(
             else:
                 raise ValueError
             loss.backward()  # compute gradient of each weight regarding loss function
+            if gradient_clip is not None:
+                nn.utils.clip_grad_value_(
+                    model.parameters(), clip_value=gradient_clip)
             optimizer.step()  # update weights by ADAM optimizer
+            if ANOMALY_DETECTION:
+                print(r"current loss: {}".format(loss.detach().numpy()))
         train_time = time.time() - t  # difference between current time and start time
 
         # -------- evaluation --------
