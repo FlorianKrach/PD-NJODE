@@ -1,5 +1,7 @@
 # Path-Dependent Neural Jump ODEs
 
+[![DOI](https://zenodo.org/badge/507857738.svg)](https://zenodo.org/badge/latestdoi/507857738)
+
 This repository is the official implementation of the paper
 [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) which is the second part of the paper
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -303,9 +305,6 @@ and the code of: https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Ne
 The [High Frequency Crypto Limit Order Book Data](https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data)
 was made public in Kaggle.
 The other bitcoin LOB dataset was gratefully provided by Covario, but is not publicly available.
-
-The GIFs of the training progress were generated with imageio:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3674137.svg)](https://doi.org/10.5281/zenodo.3674137)
 
 
 
