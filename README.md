@@ -380,7 +380,7 @@ python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id
 --------------------------------------------------------------------------------
 # Instructions for Running Experiments of Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework
 
-The code for the experiments of the paper [NJODE3](https://).
+The code for the experiments of the paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](TODO).
 
 ## Dataset Generation
 go to the source directory:
