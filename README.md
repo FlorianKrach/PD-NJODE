@@ -2,14 +2,25 @@
 
 [![DOI](https://zenodo.org/badge/507857738.svg)](https://zenodo.org/badge/latestdoi/507857738)
 
-This repository is the official implementation of the paper
-[Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) which is the second part of the paper
+This repository is the official implementation of the papers 
+- [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
+and 
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](TODO) 
+
+which are the second and third part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
 
 The code is based on the [code of the first paper](https://github.com/HerreraKrachTeichmann/NJODE), 
 but was developed further such that it is more user-friendly. 
-All experiments from the first part can be run with this repo as well (see 
+All experiments from the first paper can be run with this repo as well (see 
 [Instructions for NJODE](#instructions-for-running-experiments-of-neural-jump-ordinary-differential-equations)).
+
+The experiments from the second paper [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
+can be run with the [Instructions for NJODE2](#instructions-for-running-experiments-of-optimal-estimation-of-generic-dynamics-by-path-dependent-neural-jump-odes).
+
+The experiments from the third paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](TODO)
+can be run with the [Instructions for NJODE3](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework).
+
 
 ## Requirements
 
@@ -19,12 +30,85 @@ To install requirements, download this Repo and cd into it.
 
 Then create a new environment and install all dependencies and this repo.
 With [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html):
-```sh
+ ```sh
 conda create --name njode python=3.7
 conda activate njode
 pip install -r requirements.txt
-```
+ ```
 
+To use the Telegram-Bot see installations instructions [here](https://github.com/FlorianKrach/Telegram-Bot-Install).
+The code will run without the Telegram-Bot, but you will not receive notification and results via Telegram when the training is finished (useful when running on a server).
+
+
+--------------------------------------------------------------------------------
+## Usage, License & Citation
+
+This code can be used in accordance with the [LICENSE](LICENSE).
+
+If you find this code useful or include parts of it in your own work, 
+please cite our papers:  
+
+- [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284)
+    ```
+    @article{PDNJODE
+      url = {https://arxiv.org/abs/2206.14284},
+      author = {Krach, Florian and Nübel, Marc and Teichmann, Josef},
+      title = {Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs},
+      publisher = {arXiv},
+      year = {2022},
+    }
+    ```
+
+
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](TODO)
+
+    ```
+    @article{NJODE3,
+      title={{Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework}},
+      author={Andersson, William and Heiss, Jakob and Krach, Florian and Teichmann, Josef},
+      journal={arXiv},
+      year={2023}
+    }
+    ```
+
+
+- [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR)
+
+    ```
+    @inproceedings{
+    herrera2021neural,
+    title={Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering},
+    author={Calypso Herrera and Florian Krach and Josef Teichmann},
+    booktitle={International Conference on Learning Representations},
+    year={2021},
+    url={https://openreview.net/forum?id=JFKR3WqwyXR}
+    }
+    ```
+
+
+
+## Acknowledgements and References
+This code is based on the code-repo of the first paper [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR):
+https://github.com/HerreraKrachTeichmann/NJODE  
+Parts of this code are based on and/or copied from the code of:
+https://github.com/edebrouwer/gru_ode_bayes, of the paper
+[GRU-ODE-Bayes: Continuous modeling of sporadically-observed time series](https://arxiv.org/abs/1905.12374)
+and the code of: https://github.com/YuliaRubanova/latent_ode, of the paper
+[Latent ODEs for Irregularly-Sampled Time Series](https://arxiv.org/abs/1907.03907)
+and the code of: https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Networks-for-Limit-Order-Books/, of the paper
+[DeepLOB: Deep convolutional neural networks for limit order books](https://arxiv.org/abs/1808.03668).
+
+The [High Frequency Crypto Limit Order Book Data](https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data)
+was made public in Kaggle.
+The other bitcoin LOB dataset was gratefully provided by Covario, but is not publicly available.
+
+The GIFs of the training progress were generated with imageio:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3674137.svg)](https://doi.org/10.5281/zenodo.3674137)
+
+
+
+--------------------------------------------------------------------------------
+# Instructions for running experiments of Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs
 
 ## Dataset Generation
 go to the source directory:
@@ -87,6 +171,10 @@ python data_utils.py --dataset_name=BMwithTimeLag --dataset_params=BM_TimeLag_di
 python data_utils.py --dataset_name=BMwithTimeLag --dataset_params=BM_TimeLag_dict_testdata
 ```
 
+generate BlackScholes dataset:
+```sh
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BlackScholes_dict
+```
 
 
 ### Real World Datasets
@@ -206,6 +294,12 @@ python run.py --params=param_list_BMTimeLag --NB_JOBS=8 --NB_CPUS=1 --first_id=1
 python run.py --plot_paths=plot_paths_BMTimeLag_dict
 ```
 
+train NJmodel on BS:
+```shell
+python run.py --params=param_list_NJmodel --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_NJmodel
+python run.py --plot_paths=plot_paths_NJmodel_dict
+```
+
 
 
 ### Real World Datasets
@@ -255,56 +349,75 @@ python LOB_linreg.py
 
 
 
+--------------------------------------------------------------------------------
+# Experimental: Randomized NJODE
+In this section we provide instructions for running the experiments of the 
+randomized NJODE model. In particular, this is the NJODE model, where only the
+(last layer of) the readout map is trained, while the neural-ODE and the 
+encoder/jump network are kept fixed. There are two versions of the randomized
+NJODE model: one where the readout map is trained via SGD and one where it
+is trained via the closed-form solution of OLS (i.e. fitting a linear regression
+model).
+
+train randomizedNJODE on BM:
+```shell
+python run.py --params=param_list_randNJODE_1 --NB_JOBS=1 --NB_CPUS=3 --first_id=1
+python run.py --params=param_list_randNJODE_2 --NB_JOBS=1 --NB_CPUS=3 --first_id=3
+```
+
+train randomizedNJODE on BS:
+```shell
+python run.py --params=param_list_randNJODE_BS --NB_JOBS=1 --NB_CPUS=4 --first_id=1 --get_overview=overview_dict_randNJODE_BS
+```
+
+train randomizedNJODE on DoublePendulum:
+```shell
+python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id=100
+```
+
+
 
 --------------------------------------------------------------------------------
-## Usage, License & Citation
+# Instructions for Running Experiments of Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework
 
-This code can be used in accordance with the [LICENSE](LICENSE).
+The code for the experiments of the paper [NJODE3](https://).
 
-If you find this code useful or include parts of it in your own work, 
-please cite our papers:  
-
-[Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284)
-
-```
-@article{PDNJODE
-  url = {https://arxiv.org/abs/2206.14284},
-  author = {Krach, Florian and Nübel, Marc and Teichmann, Josef},
-  title = {Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs},
-  publisher = {arXiv},
-  year = {2022},
-}
+## Dataset Generation
+go to the source directory:
+```sh
+cd NJODE
 ```
 
-[Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR)
-
+generate the BlackScholes datset with dependent observations
+```sh
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_dep_obs_dict
 ```
-@inproceedings{
-herrera2021neural,
-title={Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering},
-author={Calypso Herrera and Florian Krach and Josef Teichmann},
-booktitle={International Conference on Learning Representations},
-year={2021},
-url={https://openreview.net/forum?id=JFKR3WqwyXR}
-}
+
+generate the Brownian motion datset with noisy observations
+```sh
+python data_utils.py --dataset_name=BMNoisyObs --dataset_params=BM_NoisyObs_dict
 ```
 
 
+## Training & Testing
+go to the source directory:
+```sh
+cd NJODE
+```
 
-## Acknowledgements and References
-This code is based on the code-repo of the first paper [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR):
-https://github.com/HerreraKrachTeichmann/NJODE  
-Parts of this code are based on and/or copied from the code of:
-https://github.com/edebrouwer/gru_ode_bayes, of the paper
-[GRU-ODE-Bayes: Continuous modeling of sporadically-observed time series](https://arxiv.org/abs/1905.12374)
-and the code of: https://github.com/YuliaRubanova/latent_ode, of the paper
-[Latent ODEs for Irregularly-Sampled Time Series](https://arxiv.org/abs/1907.03907)
-and the code of: https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Networks-for-Limit-Order-Books/, of the paper
-[DeepLOB: Deep convolutional neural networks for limit order books](https://arxiv.org/abs/1808.03668).
+train model on BlackScholes dataset with dependent observations
+```sh
+python run.py --params=param_list_DepObs_1 --NB_JOBS=24 --NB_CPUS=1 --first_id=1
+python run.py --plot_paths=plot_paths_DepObs_dict
+```
 
-The [High Frequency Crypto Limit Order Book Data](https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data)
-was made public in Kaggle.
-The other bitcoin LOB dataset was gratefully provided by Covario, but is not publicly available.
+train model on BM dataset with noisy observations
+```sh
+python run.py --params=param_list_BM_NoisyObs --NB_JOBS=24 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_BM_NoisyObs
+python run.py --plot_paths=plot_paths_BM_NoisyObs_dict
+```
+
+
 
 
 

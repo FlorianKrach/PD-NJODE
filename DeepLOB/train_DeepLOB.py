@@ -6,9 +6,7 @@ https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Networks-for-Limit-
 """
 # load packages
 import pandas as pd
-import pickle
 import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
 from tqdm import tqdm
 import sklearn
@@ -18,24 +16,22 @@ import torch
 import torch.nn.functional as F
 from torch.utils import data
 import torch.nn as nn
-import torch.optim as optim
 from torch.backends import cudnn
 from torch.utils.data import DataLoader
 
 import sys
 import socket
-import matplotlib
 import matplotlib.colors
 
 sys.path.append("../")
 sys.path.append("../NJODE/")
-import NJODE.config as config
+import configs.config as config
 import NJODE.data_utils as data_utils
 
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    import config.SendBotMessage as SBM
+    from config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -49,7 +45,6 @@ else:
     N_CPUS = 1
     SEND = True
     matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 print(socket.gethostname())
 print('SERVER={}'.format(SERVER))
 
@@ -397,7 +392,7 @@ def train(
         model, criterion, optimizer, train_loader, val_loader, val_loader2,
         epochs=epochs, device=device)
 
-    path = config.data_path+"saved_models_DeepLOB/"
+    path = config.data_path + "saved_models_DeepLOB/"
     config.makedirs(path)
     model_metric_file = "{}metric_id-{}.csv".format(path, model_id)
     df = pd.DataFrame(

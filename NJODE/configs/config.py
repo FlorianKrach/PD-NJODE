@@ -4,6 +4,9 @@ author: Florian Krach
 
 from configs.config_NJODE1 import *
 from configs.config_LOB import *
+from configs.config_randomizedNJODE import *
+from configs.config_NJmodel import *
+from configs.config_NJODE3 import *
 
 import numpy as np
 import socket
@@ -209,6 +212,7 @@ BM_TimeLag_dict_testdata = {
 
 # ==============================================================================
 # TRAINING PARAM DICTS
+# ------------------------------------------------------------------------------
 ode_nn = ((50, 'tanh'), (50, 'tanh'))
 readout_nn = ((50, 'tanh'), (50, 'tanh'))
 enc_nn = ((50, 'tanh'), (50, 'tanh'))

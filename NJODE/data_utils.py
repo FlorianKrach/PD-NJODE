@@ -71,8 +71,8 @@ def create_dataset(
                             if int: number of (dt) steps by which the 1st
                             coordinate is shifted to generate the 2nd coord.,
                             this is used to generate mask accordingly (such that
-                            second coord. is observed whenever the informatin is
-                            already known from first coord.
+                            second coord. is observed whenever the information
+                            is already known from first coord.)
                 - timelag_shift1    bool, if True: observe the second coord.
                             additionally only at one step after the observation
                             times of the first coord. with the given prob., if
@@ -80,6 +80,20 @@ def create_dataset(
                             times within timelag_in_dt_steps after observation
                             times of first coordinate, at each time with given
                             probability (in masked); default: True
+                - X_dependent_observation_prob   not given or str, if given:
+                            string that can be evaluated to a function that is
+                            applied to the generated paths to get the
+                            observation probability for each coordinate
+                - obs_scheme   dict, if given: specifies the observation scheme
+                - obs_noise    dict, if given: add noise to the observations
+                            the dict needs the following keys: 'distribution'
+                            (defining the distribution of the noise), and keys
+                            for the parameters of the distribution (depending on
+                            the used distribution); supported distributions
+                            {'normal'}. Be aware that the noise needs to be
+                            centered for the model to be able to learn the
+                            correct dynamics.
+
     :param seed: int, random seed for the generation of the dataset
     :return: str (path where the dataset is saved), int (time_id to identify
                 the dataset)
@@ -90,6 +104,9 @@ def create_dataset(
     hyperparam_dict['model_name'] = stock_model_name
     original_desc = json.dumps(hyperparam_dict, sort_keys=True)
     obs_perc = hyperparam_dict['obs_perc']
+    obs_scheme = None
+    if "obs_scheme" in hyperparam_dict:
+        obs_scheme = hyperparam_dict["obs_scheme"]
     masked = False
     masked_lambda = None
     mask_probs = None
@@ -114,14 +131,46 @@ def create_dataset(
     # stock paths shape: [nb_paths, dim, time_steps]
     stock_paths, dt = stockmodel.generate_paths()
     size = stock_paths.shape
-    observed_dates = np.random.random(size=(size[0], size[2]))
-    if "X_dependent_observation_prob" in hyperparam_dict:
-        print("use X_dependent_observation_prob")
-        prob_f = eval(hyperparam_dict["X_dependent_observation_prob"])
-        obs_perc = prob_f(stock_paths)
-    observed_dates = (observed_dates < obs_perc)*1
-    observed_dates[:, 0] = 1
-    nb_obs = np.sum(observed_dates[:, 1:], axis=1)
+    if obs_scheme is None:
+        observed_dates = np.random.random(size=(size[0], size[2]))
+        if "X_dependent_observation_prob" in hyperparam_dict:
+            print("use X_dependent_observation_prob")
+            prob_f = eval(hyperparam_dict["X_dependent_observation_prob"])
+            obs_perc = prob_f(stock_paths)
+        observed_dates = (observed_dates < obs_perc)*1
+        observed_dates[:, 0] = 1
+        nb_obs = np.sum(observed_dates[:, 1:], axis=1)
+    else:
+        if obs_scheme["name"] == "NJODE3-Example4.9":
+            """
+            implements the observation scheme from Example 4.9 in the NJODE3 
+            paper based in 1st coordinate of the process (in case there are more 
+            coordinates).
+            """
+            print("use observation scheme: NJODE3-Example4.9")
+            observed_dates = np.zeros(shape=(size[0], size[2]))
+            observed_dates[:, 0] = 1
+            p = obs_scheme["p"]
+            eta = obs_scheme["eta"]
+            for i in range(size[0]):
+                x0 = stock_paths[i, 0, 0]
+                last_observation = x0
+                last_obs_time = 0
+                for j in range(1, size[2]):
+                    v1 = np.random.binomial(1, 1/(j-last_obs_time), 1)
+                    v3 = np.random.binomial(1, p, 1)
+                    v2 = np.random.normal(0, eta, 1)
+                    m = v1*(
+                            last_observation+v2 >= stockmodel.next_cond_exp(
+                        x0, j*dt, j*dt)) + (1-v1)*v3
+                    observed_dates[i, j] = m
+                    if m == 1:
+                        last_observation = stock_paths[i, 0, j]
+                        last_obs_time = j
+            nb_obs = np.ones(shape=(size[0],))*size[2]
+        else:
+            raise ValueError("obs_scheme {} not implemented".format(
+                obs_scheme["name"]))
     if masked:
         mask = np.zeros(shape=size)
         mask[:,:,0] = 1
@@ -152,6 +201,23 @@ def create_dataset(
                 mask1 = mult*np.random.binomial(1, mask_probs[1], mult.shape)
                 mask[:,1,:] = np.maximum(mask1, mask_shift)
         observed_dates = mask
+    if "obs_noise" in hyperparam_dict:
+        obs_noise_dict = hyperparam_dict["obs_noise"]
+        if obs_noise_dict["distribution"] == "normal":
+            obs_noise = np.random.normal(
+                loc=obs_noise_dict["loc"],
+                scale=obs_noise_dict["scale"],
+                size=size)
+            if 'noise_at_start' in obs_noise_dict and \
+                    obs_noise_dict['noise_at_start']:
+                pass
+            else:
+                obs_noise[:,:,0] = 0
+        else:
+            raise ValueError("obs_noise distribution {} not implemented".format(
+                obs_noise_dict["distribution"]))
+    else:
+        obs_noise = None
 
     # time_id = int(time.time())
     time_id = 1
@@ -177,6 +243,8 @@ def create_dataset(
         np.save(f, stock_paths)
         np.save(f, observed_dates)
         np.save(f, nb_obs)
+        if obs_noise is not None:
+            np.save(f, obs_noise)
     with open('{}metadata.txt'.format(path), 'w') as f:
         json.dump(hyperparam_dict, f, sort_keys=True)
 
@@ -572,14 +640,18 @@ def load_dataset(stock_model_name="BlackScholes", time_id=None):
         return samples, times, eval_samples, eval_times, eval_labels, \
                hyperparam_dict
 
+    with open('{}metadata.txt'.format(path), 'r') as f:
+        hyperparam_dict = json.load(f)
     with open('{}data.npy'.format(path), 'rb') as f:
         stock_paths = np.load(f)
         observed_dates = np.load(f)
         nb_obs = np.load(f)
-    with open('{}metadata.txt'.format(path), 'r') as f:
-        hyperparam_dict = json.load(f)
+        if "obs_noise" in hyperparam_dict:
+            obs_noise = np.load(f)
+        else:
+            obs_noise = None
 
-    return stock_paths, observed_dates, nb_obs, hyperparam_dict
+    return stock_paths, observed_dates, nb_obs, hyperparam_dict, obs_noise
 
 
 class IrregularDataset(Dataset):
@@ -587,14 +659,15 @@ class IrregularDataset(Dataset):
     class for iterating over a dataset
     """
     def __init__(self, model_name, time_id=None, idx=None):
-        stock_paths, observed_dates, nb_obs, hyperparam_dict = load_dataset(
-            stock_model_name=model_name, time_id=time_id)
+        stock_paths, observed_dates, nb_obs, hyperparam_dict, obs_noise = \
+            load_dataset(stock_model_name=model_name, time_id=time_id)
         if idx is None:
             idx = np.arange(hyperparam_dict['nb_paths'])
         self.metadata = hyperparam_dict
         self.stock_paths = stock_paths[idx]
         self.observed_dates = observed_dates[idx]
         self.nb_obs = nb_obs[idx]
+        self.obs_noise = obs_noise
 
     def __len__(self):
         return len(self.nb_obs)
@@ -602,10 +675,15 @@ class IrregularDataset(Dataset):
     def __getitem__(self, idx):
         if type(idx) == int:
             idx = [idx]
+        if self.obs_noise is None:
+            obs_noise = None
+        else:
+            obs_noise = self.obs_noise[idx]
         # stock_path dimension: [BATCH_SIZE, DIMENSION, TIME_STEPS]
         return {"idx": idx, "stock_path": self.stock_paths[idx], 
                 "observed_dates": self.observed_dates[idx], 
-                "nb_obs": self.nb_obs[idx], "dt": self.metadata['dt']}
+                "nb_obs": self.nb_obs[idx], "dt": self.metadata['dt'],
+                "obs_noise": obs_noise}
 
 
 class LOBDataset(Dataset):
@@ -655,7 +733,10 @@ def _get_func(name):
             return np.power(input, x)
         return pow
     else:
-        return None
+        try:
+            return eval(name)
+        except Exception:
+            return None
 
 
 def _get_X_with_func_appl(X, functions, axis):
@@ -700,6 +781,9 @@ def CustomCollateFnGen(func_names=None):
         stock_paths = np.concatenate([b['stock_path'] for b in batch], axis=0)
         observed_dates = np.concatenate([b['observed_dates'] for b in batch],
                                         axis=0)
+        obs_noise = np.concatenate([b['obs_noise'] for b in batch], axis=0)
+        if obs_noise[0] is None:
+            obs_noise = None
         masked = False
         mask = None
         if len(observed_dates.shape) == 3:
@@ -711,10 +795,12 @@ def CustomCollateFnGen(func_names=None):
 
         # here axis=1, since we have elements of dim
         #    [batch_size, data_dimension] => add as new data_dimensions
+        sp = stock_paths[:, :, 0]
+        if obs_noise is not None:
+            sp = stock_paths[:, :, 0] + obs_noise[:, :, 0]
         start_X = torch.tensor(
-            _get_X_with_func_appl(stock_paths[:, :, 0], functions, axis=1), 
-            dtype=torch.float32
-        )
+            _get_X_with_func_appl(sp, functions, axis=1),
+            dtype=torch.float32)
         X = []
         if masked:
             M = []
@@ -738,8 +824,10 @@ def CustomCollateFnGen(func_names=None):
                         # here axis=0, since only 1 dim (the data_dimension),
                         #    i.e. the batch-dim is cummulated outside together
                         #    with the time dimension
-                        X.append(_get_X_with_func_appl(stock_paths[i, :, t], 
-                                                       functions, axis=0))
+                        sp = stock_paths[i, :, t]
+                        if obs_noise is not None:
+                            sp = stock_paths[i, :, t] + obs_noise[i, :, t]
+                        X.append(_get_X_with_func_appl(sp, functions, axis=0))
                         if masked:
                             M.append(np.tile(mask[i, :, t], reps=mult))
                         obs_idx.append(i)
@@ -753,7 +841,7 @@ def CustomCollateFnGen(func_names=None):
                'start_X': start_X, 'n_obs_ot': nb_obs,
                'X': torch.tensor(np.array(X), dtype=torch.float32),
                'true_paths': stock_paths, 'observed_dates': observed_dates,
-               'true_mask': mask,
+               'true_mask': mask, 'obs_noise': obs_noise,
                'M': M, 'start_M': start_M}
         return res
 

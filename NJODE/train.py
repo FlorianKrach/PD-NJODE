@@ -22,6 +22,7 @@ import matplotlib  # plots
 import matplotlib.colors
 from torch.backends import cudnn
 import gc
+import scipy.stats as stats
 
 from configs import config
 import models
@@ -152,6 +153,7 @@ def train(
             'save_extras'   bool, dict of options for saving the plots
             'plot_variance' bool, whether to plot also variance
             'std_factor'    float, the factor by which the std is multiplied
+                            when plotting the variance
             'parallel'      bool, used by parallel_train.parallel_training
             'resume_training'   bool, used by parallel_train.parallel_training
             'plot_only'     bool, whether the model is used only to plot after
@@ -228,6 +230,7 @@ def train(
                                         the covariate_map is used as a mapping
                                         to get the initial h (for controlled
                                         ODE-RNN this is done by the encoder)
+                -> 'randomizedNJODE' has same options as NJODE
     """
 
     global ANOMALY_DETECTION, USE_GPU, SEND, N_CPUS, N_DATASET_WORKERS
@@ -434,6 +437,14 @@ def train(
     if 'other_model' not in options:  # take NJODE model if not specified otherwise
         model = models.NJODE(**params_dict)  # get NJODE model class from
         model_name = 'NJODE'
+    elif options['other_model'] == "randomizedNJODE":
+        model_name = 'randomizedNJODE'
+        epochs = 1
+        model = models.randomizedNJODE(**params_dict)
+    elif options['other_model'] == "NJmodel":
+        model_name = 'NJmodel'
+        params_dict["hidden_size"] = output_size
+        model = models.NJmodel(**params_dict)
     elif options['other_model'] == "GRU_ODE_Bayes":  # see train documentation
         model_name = 'GRU-ODE-Bayes'
         # get parameters for GRU-ODE-Bayes model
@@ -476,9 +487,17 @@ def train(
     else:
         raise ValueError("Invalid argument for (option) parameter 'other_model'."
                          "Please check docstring for correct use.")
+    train_readout_only = False
+    if 'train_readout_only' in options:
+        train_readout_only = options['train_readout_only']
     model.to(device)  # pass model to CPU/GPU
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
-                                 weight_decay=0.0005)
+    if not train_readout_only:
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=learning_rate, weight_decay=0.0005)
+    else:
+        optimizer = torch.optim.Adam(
+            model.readout_map.parameters(), lr=learning_rate,
+            weight_decay=0.0005)
     gradient_clip = None
     if 'gradient_clip' in options:
         gradient_clip = options["gradient_clip"]
@@ -583,6 +602,10 @@ def train(
     while model.epoch <= epochs:
         t = time.time()  # return the time in seconds since the epoch
         model.train()  # set model in train mode (e.g. BatchNorm)
+        if 'other_model' in options and \
+                options['other_model'] == "randomizedNJODE":
+            linreg_X = []
+            linreg_y = []
         for i, b in tqdm.tqdm(enumerate(dl)):  # iterate over the dataloader
             optimizer.zero_grad()  # reset the gradient
             times = b["times"]  # Produce instance of byte type instead of str type
@@ -599,11 +622,20 @@ def train(
             obs_idx = b["obs_idx"]
             n_obs_ot = b["n_obs_ot"].to(device)
 
-            if 'other_model' not in options:
+            if 'other_model' not in options or model_name == "NJmodel":
                 hT, loss = model(
                     times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
                     delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
                     return_path=False, get_loss=True, M=M, start_M=start_M)
+            elif options['other_model'] == "randomizedNJODE":
+                linreg_X_, linreg_y_ = model.get_Xy_reg(
+                    times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
+                    delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
+                    return_path=False, M=M, start_M=start_M)
+                linreg_X += linreg_X_
+                linreg_y += linreg_y_
+                loss = torch.tensor(0.)
+                continue
             elif options['other_model'] == "GRU_ODE_Bayes":
                 if M is None:
                     M = torch.ones_like(X)
@@ -619,9 +651,16 @@ def train(
             optimizer.step()  # update weights by ADAM optimizer
             if ANOMALY_DETECTION:
                 print(r"current loss: {}".format(loss.detach().numpy()))
+        if 'other_model' in options and \
+                options['other_model'] == "randomizedNJODE":
+            linreg_X = np.stack(linreg_X, axis=0)
+            linreg_y = np.stack(linreg_y, axis=0)
+            print("OLS to fit readout-map ...")
+            model.readout_map.fit(linreg_X, linreg_y)
         train_time = time.time() - t  # difference between current time and start time
 
         # -------- evaluation --------
+        print("evaluating ...")
         t = time.time()
         batch = None
         with torch.no_grad():  # no gradient needed for evaluation
@@ -649,7 +688,8 @@ def train(
                 true_paths = b["true_paths"]
                 true_mask = b["true_mask"]
 
-                if 'other_model' not in options:
+                if 'other_model' not in options or \
+                        model_name in ("randomizedNJODE", "NJmodel"):
                     hT, c_loss = model(
                         times, time_ptr, X, obs_idx, delta_t, T, start_X,
                         n_obs_ot, return_path=False, get_loss=True, M=M,
@@ -874,6 +914,10 @@ def plot_one_path_with_pred(
     bs, dim, time_steps = true_X.shape
     true_M = batch["true_mask"]
     observed_dates = batch['observed_dates']
+    if "obs_noise" in batch:
+        obs_noise = batch["obs_noise"]
+    else:
+        obs_noise = None
     path_t_true_X = np.linspace(0., T, int(np.round(T / delta_t)) + 1)
 
     model.eval()  # put model in evaluation mode
@@ -913,30 +957,36 @@ def plot_one_path_with_pred(
             # get the true_X at observed dates
             path_t_obs = []
             path_X_obs = []
+            if obs_noise is not None:
+                path_O_obs = []
             for k, od in enumerate(observed_dates[i]):
                 if od == 1:
                     if true_M is None or (true_M is not None and
                                           true_M[i, j, k]==1):
                         path_t_obs.append(path_t_true_X[k])
                         path_X_obs.append(true_X[i, j, k])
+                        if obs_noise is not None:
+                            path_O_obs.append(
+                                true_X[i, j, k]+obs_noise[i, j, k])
             path_t_obs = np.array(path_t_obs)
             path_X_obs = np.array(path_X_obs)
+            if obs_noise is not None:
+                path_O_obs = np.array(path_O_obs)
 
             axs[j].plot(path_t_true_X, true_X[i, j, :], label='true path',
                         color=colors[0])
-            axs[j].scatter(path_t_obs, path_X_obs, label='observed',
-                           color=colors[0])
+            if obs_noise is not None:
+                axs[j].scatter(path_t_obs, path_O_obs, label='observed',
+                               color=colors[0])
+                axs[j].scatter(path_t_obs, path_X_obs,
+                               label='true value at obs time',
+                               color=colors[2], marker='*')
+            else:
+                axs[j].scatter(path_t_obs, path_X_obs, label='observed',
+                               color=colors[0])
             axs[j].plot(path_t_pred, path_y_pred[:, i, j],
                         label=model_name, color=colors[1])
             if plot_variance:
-                # axs[j].plot(
-                #     path_t_pred,
-                #     path_y_pred[:, i, j] + std_factor*path_std_pred[:, i, j],
-                #     color=colors[1])
-                # axs[j].plot(
-                #     path_t_pred,
-                #     path_y_pred[:, i, j] - std_factor*path_std_pred[:, i, j],
-                #     color=colors[1])
                 axs[j].fill_between(
                     path_t_pred,
                     path_y_pred[:, i, j] - std_factor * path_std_pred[:, i, j],
@@ -952,6 +1002,25 @@ def plot_one_path_with_pred(
                     prob_f = eval(
                         dataset_metadata["X_dependent_observation_prob"])
                     obs_perc = prob_f(true_X[:, :, :])[i]
+                elif "obs_scheme" in dataset_metadata:
+                    obs_scheme = dataset_metadata["obs_scheme"]
+                    if obs_scheme["name"] == "NJODE3-Example4.9":
+                        obs_perc = np.ones_like(path_t_true_X)
+                        x0 = true_X[i, 0, 0]
+                        p = obs_scheme["p"]
+                        eta = obs_scheme["eta"]
+                        last_observation = x0
+                        last_obs_time = 0
+                        for k, t in enumerate(path_t_true_X[1:]):
+                            q = 1/(k+1-last_obs_time)
+                            normal_prob = stats.norm.sf(
+                                stockmodel.next_cond_exp(
+                                    x0, (k+1)*delta_t, (k+1)*delta_t),
+                                scale=eta, loc=last_observation)
+                            obs_perc[k+1] = q*normal_prob + (1-q)*p
+                            if observed_dates[i, k+1] == 1:
+                                last_observation = true_X[i, 0, k+1]
+                                last_obs_time = k+1
                 else:
                     obs_perc = dataset_metadata['obs_perc']
                     obs_perc = np.ones_like(path_t_true_X) * obs_perc
@@ -966,9 +1035,11 @@ def plot_one_path_with_pred(
             if same_yaxis:
                 low = np.min(true_X[i, :, :])
                 high = np.max(true_X[i, :, :])
+                if obs_noise is not None:
+                    low = min(low, np.min(true_X[i]+obs_noise[i]))
+                    high = max(high, np.max(true_X[i]+obs_noise[i]))
                 eps = (high - low)*0.05
                 axs[j].set_ylim([low-eps, high+eps])
-
 
         axs[-1].legend()
         plt.xlabel('$t$')
