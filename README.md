@@ -317,6 +317,7 @@ python run.py --params=param_list_climate --NB_JOBS=8 --NB_CPUS=1 --first_id=1 -
 train model on Limit Order Book datasets:
 ```sh
 python run.py --params=param_list_LOB --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB
+python run.py --plot_paths=plot_paths_LOB_dict
 ```
 
 retrain classifier on LOB dataset:
@@ -327,19 +328,13 @@ python run.py --params=param_list_retrainLOB --NB_JOBS=42 --NB_CPUS=1 --first_id
 train model on Limit Order Book Kaggle datasets:
 ```sh
 python run.py --params=param_list_LOB_K --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB_K
+python run.py --params=param_list_LOB_n --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB_n
 python run.py --plot_paths=plot_paths_LOB_K_dict
 ```
 
 retrain classifier on LOB Kaggle dataset:
 ```shell
 python run.py --params=param_list_retrainLOB_K --NB_JOBS=42 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_retrainLOB_K
-```
-
-train & retrain models (with results shown in paper) on Limit Order datasets:
-```sh
-python run.py --params=param_list_LOB_n --NB_JOBS=22 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_LOB_n
-python run.py --plot_paths=plot_paths_LOB_n_dict
-python run.py --plot_paths=plot_paths_LOB_n_dict_1
 python run.py --params=param_list_retrainLOB_n --NB_JOBS=42 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_retrainLOB_n
 ```
 

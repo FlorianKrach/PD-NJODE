@@ -248,6 +248,13 @@ overview_dict_LOB = dict(
     sortby=["dataset_id", "evaluation_f1score_max"],
 )
 
+plot_paths_LOB_dict = {
+    'model_ids': [21], 'saved_models_path': LOB_models_path,
+    'which': 'best', 'paths_to_plot': [],
+    'save_extras': {'bbox_inches': 'tight', 'pad_inches': 0.01},
+    'LOB_plot_errors': True, 'plot_boxplot_only': True,}
+
+
 
 # ------------------------------------------------------------------------------
 # --- retrain_LOB
@@ -511,18 +518,6 @@ overview_dict_LOB_n = dict(
     ),
     sortby=["data_dict", "evaluation_f1score_max"],
 )
-
-plot_paths_LOB_n_dict = {
-    'model_ids': [1,2,3], 'saved_models_path': LOB_n_models_path,
-    'which': 'best', 'paths_to_plot': [],
-    'save_extras': {'bbox_inches': 'tight', 'pad_inches': 0.01},
-    'LOB_plot_errors': True, 'plot_boxplot_only': True,}
-
-plot_paths_LOB_n_dict_1 = {
-    'model_ids': [1,2,3], 'saved_models_path': LOB_n_models_path,
-    'which': 'best', 'paths_to_plot': [],
-    'save_extras': {'bbox_inches': 'tight', 'pad_inches': 0.01},
-    'LOB_plot_errors': True, 'plot_boxplot_only': False,}
 
 
 
