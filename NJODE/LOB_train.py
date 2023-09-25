@@ -475,9 +475,13 @@ def train(
             pred_errors = pred_errors[:, 0]
         plot_filename = 'error-distr-plot_epoch-{}_id-{}.pdf'.format(
             model.epoch, model_id)
-        fig, axs = plt.subplots(ncols=2)
-        axs[0].hist(pred_errors, bins=100, density=True)
-        axs[1].boxplot(pred_errors)
+        if 'plot_boxplot_only' in options and options['plot_boxplot_only']:
+            fig = plt.figure(figsize=(6.4, 2.4))
+            plt.boxplot(pred_errors, vert=False)
+        else:
+            fig, axs = plt.subplots(ncols=2)
+            axs[0].hist(pred_errors, bins=100, density=True)
+            axs[1].boxplot(pred_errors)
         save_f = os.path.join(plot_save_path, plot_filename)
         plt.savefig(save_f, **save_extras)
         plt.close()

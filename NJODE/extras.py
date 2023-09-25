@@ -359,6 +359,7 @@ def get_training_overview(
 def plot_paths_from_checkpoint(
         saved_models_path=config.saved_models_path, send=SEND,
         model_ids=(1,), which='best', paths_to_plot=(0,), LOB_plot_errors=False,
+        plot_boxplot_only=False,
         **options
 ):
     """
@@ -370,6 +371,7 @@ def plot_paths_from_checkpoint(
         LOB_plot_errors should be executed
     :param LOB_plot_errors: bool, whether to plot the error distribution for
         LOB model
+    :param plot_boxplot_only: bool, whether to only plot the boxplot of LOB
     :param options: feed directly to train
     :return:
     """
@@ -397,6 +399,10 @@ def plot_paths_from_checkpoint(
                 params_dict['plot_errors'] = True
                 if paths_to_plot is None:
                     params_dict['plot_only'] = False
+                if plot_boxplot_only:
+                    params_dict['plot_boxplot_only'] = True
+                else:
+                    params_dict['plot_boxplot_only'] = False
             for key in options:
                 params_dict[key] = options[key]
 
