@@ -58,8 +58,7 @@ import matplotlib.pyplot as plt
 # Adapted from: https://github.com/rtqichen/time-series-datasets
 
 # get minimum and maximum for each feature across the whole dataset
-def get_data_min_max(records):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def get_data_min_max(records, device):
 
     data_min, data_max = None, None
     inf = torch.Tensor([float("Inf")])[0].to(device)

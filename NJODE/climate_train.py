@@ -33,7 +33,7 @@ import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    from config import SendBotMessage as SBM
+    from configs.config import SendBotMessage as SBM
 
 
 # =====================================================================================================================

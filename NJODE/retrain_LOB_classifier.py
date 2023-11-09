@@ -28,7 +28,7 @@ sys.path.append("../")
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    from config import SendBotMessage as SBM
+    from configs.config import SendBotMessage as SBM
 
 
 # =====================================================================================================================

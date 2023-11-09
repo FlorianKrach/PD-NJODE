@@ -455,7 +455,7 @@ class FFNN(torch.nn.Module):
         if self.case == 0:
             pass
         elif self.case == 1:
-            identity = torch.zeros((nn_input.shape[0], self.output_size))
+            identity = torch.zeros((nn_input.shape[0], self.output_size)).to(self.device)
             identity[:, 0:nn_input.shape[1]] = nn_input
             out = identity + out
         elif self.case == 2:
@@ -463,8 +463,14 @@ class FFNN(torch.nn.Module):
             out = identity + out
 
         if self.clamp is not None:
-            out = torch.clamp(out, min=-self.clamp, max=self.clamp)
+            out = torch.clamp(ou, tmin=-self.clamp, max=self.clamp)
         return out
+
+    @property
+    def device(self):
+        device = next(self.parameters()).device
+        return device
+
 
 
 class NJODE(torch.nn.Module):
@@ -594,6 +600,11 @@ class NJODE(torch.nn.Module):
         self.hidden_size = hidden_size
 
         self.apply(init_weights)
+    
+    @property
+    def device(self):
+        device = next(self.parameters()).device
+        return device
 
     def get_classifier(self, classifier_dict):
         self.classifier = None
@@ -634,9 +645,9 @@ class NJODE(torch.nn.Module):
         # shape: [batch_size, time_steps+1, dimension]
         data = np.empty(shape=(start_X.shape[0], 1+len(times), start_X.shape[1]))
         data[:] = np.nan
-        data[:,0,:] = start_X.detach().numpy()
+        data[:,0,:] = start_X.detach().cpu().numpy()
 
-        X = X.detach().numpy()
+        X = X.detach().cpu().numpy()
         for j, time in enumerate(times):
             start = time_ptr[j]
             end = time_ptr[j + 1]
@@ -741,9 +752,9 @@ class NJODE(torch.nn.Module):
         if dim_to is None:
             dim_to = data_dim
         if self.coord_wise_tau:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(self.device)
         else:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, 1)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(self.device)
         current_time = 0.0
         loss = 0
         c_sig = None
@@ -764,7 +775,7 @@ class NJODE(torch.nn.Module):
             # in beginning, no path was observed => set sig to 0
             current_sig = np.zeros((batch_size, self.sig_depth))
             current_sig_nb = np.zeros(batch_size).astype(int)
-            c_sig = torch.from_numpy(current_sig).float()
+            c_sig = torch.from_numpy(current_sig).float().to(self.device)
 
         if self.masked:
             if start_M is None:
@@ -774,8 +785,8 @@ class NJODE(torch.nn.Module):
 
         h = self.encoder_map(
             start_X, mask=start_M, sig=c_sig,
-            h=torch.zeros((batch_size, self.hidden_size)),
-            t=torch.cat((tau, current_time - tau), dim=1))
+            h=torch.zeros((batch_size, self.hidden_size)).to(self.device),
+            t=torch.cat((tau, current_time - tau), dim=1).to(self.device))
         # if self.encoder_map.use_lstm:
         #     self.c_ = torch.chunk(h.clone(), chunks=2, dim=1)[1]
 
@@ -817,7 +828,7 @@ class NJODE(torch.nn.Module):
             i_obs = obs_idx[start:end]
             if self.masked:
                 if isinstance(M, np.ndarray):
-                    M_obs = torch.from_numpy(M[start:end])
+                    M_obs = torch.from_numpy(M[start:end]).to(self.device)
                 else:
                     M_obs = M[start:end]
             else:
@@ -828,7 +839,7 @@ class NJODE(torch.nn.Module):
                 for j in i_obs:
                     current_sig[j, :] = signature[j][current_sig_nb[j]]
                 current_sig_nb[i_obs] += 1
-                c_sig = torch.from_numpy(current_sig).float()
+                c_sig = torch.from_numpy(current_sig).float().to(self.device)
 
             # Using RNNCell to update h. Also updating loss, tau and last_X
             Y_bj = self.readout_map(h)
@@ -1258,6 +1269,11 @@ class randomizedNJODE(torch.nn.Module):
 
         self.apply(init_weights)
 
+    @property
+    def device(self):
+        device = next(self.parameters()).device
+        return device
+
     def get_classifier(self, classifier_dict):
         self.classifier = None
         self.SM = None
@@ -1297,9 +1313,9 @@ class randomizedNJODE(torch.nn.Module):
         # shape: [batch_size, time_steps+1, dimension]
         data = np.empty(shape=(start_X.shape[0], 1+len(times), start_X.shape[1]))
         data[:] = np.nan
-        data[:,0,:] = start_X.detach().numpy()
+        data[:,0,:] = start_X.detach().cpu().numpy()
 
-        X = X.detach().numpy()
+        X = X.detach().cpu().numpy()
         for j, time in enumerate(times):
             start = time_ptr[j]
             end = time_ptr[j + 1]
@@ -1642,9 +1658,9 @@ class randomizedNJODE(torch.nn.Module):
         if dim_to is None:
             dim_to = data_dim
         if self.coord_wise_tau:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(self.device)
         else:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, 1)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(self.device)
         current_time = 0.0
         loss = 0
         c_sig = None
@@ -1665,7 +1681,7 @@ class randomizedNJODE(torch.nn.Module):
             # in beginning, no path was observed => set sig to 0
             current_sig = np.zeros((batch_size, self.sig_depth))
             current_sig_nb = np.zeros(batch_size).astype(int)
-            c_sig = torch.from_numpy(current_sig).float()
+            c_sig = torch.from_numpy(current_sig).float().to(self.device)
 
         if self.masked:
             if start_M is None:
@@ -1675,7 +1691,7 @@ class randomizedNJODE(torch.nn.Module):
 
         h = self.encoder_map(
             start_X, mask=start_M, sig=c_sig,
-            h=torch.zeros((batch_size, self.hidden_size)))
+            h=torch.zeros((batch_size, self.hidden_size)).to(self.device))
 
         if return_path:
             path_t = [0]
@@ -1715,7 +1731,7 @@ class randomizedNJODE(torch.nn.Module):
             i_obs = obs_idx[start:end]
             if self.masked:
                 if isinstance(M, np.ndarray):
-                    M_obs = torch.from_numpy(M[start:end])
+                    M_obs = torch.from_numpy(M[start:end]).to(self.device)
                 else:
                     M_obs = M[start:end]
             else:
@@ -1726,7 +1742,7 @@ class randomizedNJODE(torch.nn.Module):
                 for j in i_obs:
                     current_sig[j, :] = signature[j][current_sig_nb[j]]
                 current_sig_nb[i_obs] += 1
-                c_sig = torch.from_numpy(current_sig).float()
+                c_sig = torch.from_numpy(current_sig).float().to(self.device)
 
             # Using RNNCell to update h. Also updating loss, tau and last_X
             Y_bj = self.readout_map(h)
@@ -1788,7 +1804,7 @@ class randomizedNJODE(torch.nn.Module):
         # after every observation has been processed, propagating until T
         if until_T:
             if self.input_sig:
-                c_sig = torch.from_numpy(current_sig).float()
+                c_sig = torch.from_numpy(current_sig).float().to(self.device)
             while current_time < T - 1e-10 * delta_t:
                 if current_time < T - delta_t:
                     delta_t_ = delta_t

@@ -20,7 +20,7 @@ from train_switcher import train_switcher
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    from config import SendBotMessage as SBM
+    from configs.config import SendBotMessage as SBM
 
 if 'ada-' not in socket.gethostname():
     SERVER = False

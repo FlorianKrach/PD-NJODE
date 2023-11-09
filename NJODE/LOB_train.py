@@ -29,7 +29,7 @@ sys.path.append("../")
 try:
     from telegram_notifications import send_bot_message as SBM
 except Exception:
-    from config import SendBotMessage as SBM
+    from configs.config import SendBotMessage as SBM
 
 
 # =====================================================================================================================
@@ -75,7 +75,7 @@ makedirs = config.makedirs
 
 def train(
         anomaly_detection=None, n_dataset_workers=None, use_gpu=None,
-        nb_cpus=None, send=None,
+        nb_cpus=None, send=None, gpu_num=0,
         model_id=None, epochs=100, batch_size=100, save_every=1,
         learning_rate=0.001, test_size=0.2, seed=398,
         hidden_size=10, bias=True, dropout_rate=0.1,

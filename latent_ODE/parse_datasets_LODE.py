@@ -157,7 +157,7 @@ def parse_datasets(args, device):
 		input_dim = vals.size(-1)
 
 		batch_size = min(min(len(train_dataset_obj), args.batch_size), args.n)
-		data_min, data_max = get_data_min_max(total_dataset)
+		data_min, data_max = get_data_min_max(total_dataset, device)
 
 		train_dataloader = DataLoader(train_data, batch_size= batch_size, shuffle=False, 
 			collate_fn= lambda batch: variable_time_collate_fn1(batch, args, device, data_type = "train",
