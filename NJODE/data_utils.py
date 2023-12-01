@@ -781,9 +781,6 @@ def CustomCollateFnGen(func_names=None):
         stock_paths = np.concatenate([b['stock_path'] for b in batch], axis=0)
         observed_dates = np.concatenate([b['observed_dates'] for b in batch],
                                         axis=0)
-        """obs_noise = np.concatenate([b['obs_noise'] for b in batch], axis=0)
-        if obs_noise[0] is None:
-            obs_noise = None"""
         obs_noise = None
         if batch[0]["obs_noise"] is not None:
             obs_noise = np.concatenate([b['obs_noise'] for b in batch], axis=0)
@@ -838,7 +835,6 @@ def CustomCollateFnGen(func_names=None):
 
         assert len(obs_idx) == observed_dates[:, 1:].sum()
         if masked:
-            # M = torch.tensor(M, dtype=torch.float32)
             M = torch.tensor(np.array(M), dtype=torch.float32)
         res = {'times': np.array(times), 'time_ptr': np.array(time_ptr),
                'obs_idx': torch.tensor(obs_idx, dtype=torch.long),

@@ -764,7 +764,7 @@ for _nn in [((50, 'tanh'),), ((200, 'tanh'), (200, 'tanh')), ]:
 
 overview_dict_climate = dict(
     ids_from=1, ids_to=len(param_list_climate),
-    path=FBM_models_path,
+    path=climate_models_path,
     params_extract_desc=('data_index', 'network_size', 'nb_layers',
                          'activation_function_1', 'use_rnn',
                          'readout_nn', 'dropout_rate',

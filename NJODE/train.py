@@ -1027,8 +1027,9 @@ def plot_one_path_with_pred(
                          label="observation probability")
                 ax2.set_ylim(-0.1, 1.1)
                 ax2.set_ylabel("observation probability")
-                axs[j].set_ylabel("X")
+                axs[j].set_ylabel("$X$")
                 ax2.legend()
+                axs[j].set_xlabel("$t$")
             if ylabels:
                 axs[j].set_ylabel(ylabels[j])
             if same_yaxis:

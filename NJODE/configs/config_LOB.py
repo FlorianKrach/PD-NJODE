@@ -255,7 +255,6 @@ plot_paths_LOB_dict = {
     'LOB_plot_errors': True, 'plot_boxplot_only': True,}
 
 
-
 # ------------------------------------------------------------------------------
 # --- retrain_LOB
 param_list_retrainLOB = []
@@ -518,7 +517,6 @@ overview_dict_LOB_n = dict(
     ),
     sortby=["data_dict", "evaluation_f1score_max"],
 )
-
 
 
 # --- retrain_LOB_n

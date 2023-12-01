@@ -60,7 +60,7 @@ please cite our papers:
     ```
 
 
-- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](TODO)
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147)
 
     ```
     @article{ExtPDNJODE,
@@ -110,6 +110,8 @@ The GIFs of the training progress were generated with imageio:
 
 --------------------------------------------------------------------------------
 # Instructions for running experiments of Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs
+
+The configs for the experiment are in the main config file [config.py](NJODE/configs/config.py) as well as in [config_LOB.py](NJODE/configs/config_LOB.py), [config_NJmodel.py](NJODE/configs/config_NJmodel.py) and [config_randomizedNJODE.py](NJODE/configs/config_randomizedNJODE.py).
 
 ## Dataset Generation
 go to the source directory:
@@ -245,6 +247,9 @@ List of all flags:
 
 
 ### Synthetic Datasets
+
+*See [config.py](NJODE/configs/config.py):*
+
 train model on Poisson Point Process:
 ```sh
 python run.py --params=param_list_poissonpp1 --NB_JOBS=1 --NB_CPUS=1 --first_id=1
@@ -295,7 +300,7 @@ python run.py --params=param_list_BMTimeLag --NB_JOBS=8 --NB_CPUS=1 --first_id=1
 python run.py --plot_paths=plot_paths_BMTimeLag_dict
 ```
 
-train NJmodel on BS:
+train NJmodel on BS (*see [config_NJmodel.py](NJODE/configs/config_NJmodel.py)*):
 ```shell
 python run.py --params=param_list_NJmodel --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_NJmodel
 python run.py --plot_paths=plot_paths_NJmodel_dict
@@ -304,6 +309,9 @@ python run.py --plot_paths=plot_paths_NJmodel_dict
 
 
 ### Real World Datasets
+
+*See [config.py](NJODE/configs/config.py):*
+
 train model on PhysioNet datasets:
 ```sh
 python run.py --params=param_list_physio --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_physio --crossval=crossval_dict_physio
@@ -313,6 +321,8 @@ train model on Climate datasets:
 ```sh
 python run.py --params=param_list_climate --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_climate --crossval=crossval_dict_climate
 ```
+
+*See [config_LOB.py](NJODE/configs/config_LOB.py):*
 
 train model on Limit Order Book datasets:
 ```sh
@@ -351,6 +361,7 @@ python LOB_linreg.py
 
 
 
+
 --------------------------------------------------------------------------------
 # Experimental: Randomized NJODE
 In this section we provide instructions for running the experiments of the 
@@ -360,6 +371,8 @@ encoder/jump network are kept fixed. There are two versions of the randomized
 NJODE model: one where the readout map is trained via SGD and one where it
 is trained via the closed-form solution of OLS (i.e. fitting a linear regression
 model).
+
+See [config_randomizedNJODE.py](NJODE/configs/config_randomizedNJODE.py):
 
 train randomizedNJODE on BM:
 ```shell
@@ -383,6 +396,8 @@ python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id
 # Instructions for Running Experiments of Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework
 
 The code for the experiments of the paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147).
+
+The configs for these experiments are in [config_NJODE3.py](NJODE/configs/config_NJODE3.py).
 
 ## Dataset Generation
 go to the source directory:
@@ -419,6 +434,16 @@ python run.py --params=param_list_BM_NoisyObs --NB_JOBS=24 --NB_CPUS=1 --first_i
 python run.py --plot_paths=plot_paths_BM_NoisyObs_dict
 ```
 
+train model for noisy observations on PhysioNet datasets:
+```sh
+python run.py --params=param_list_physio_N3 --NB_JOBS=12 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_physio_N3 --plot_loss_comparison=plot_loss_comparison_physio_N3
+```
+
+train model for noisy observations on Climate datasets:
+```sh
+python run.py --params=param_list_climate_N3 --NB_JOBS=40 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_climate_N3 --crossval=crossval_dict_climate_N3
+```
+
 
 
 
@@ -433,6 +458,7 @@ is available [here](https://github.com/HerreraKrachTeichmann/NJODE).
 In the current repository, the code was developed further such that it is more user-friendly.
 Below are the instructions to run the experiments of the first paper.
 
+The configs for these experiments are in [config_NJODE1.py](NJODE/configs/config_NJODE1.py).
 
 ## Dataset Generation
 go to the source directory:

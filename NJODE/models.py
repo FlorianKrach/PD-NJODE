@@ -455,7 +455,8 @@ class FFNN(torch.nn.Module):
         if self.case == 0:
             pass
         elif self.case == 1:
-            identity = torch.zeros((nn_input.shape[0], self.output_size)).to(self.device)
+            identity = torch.zeros((nn_input.shape[0], self.output_size)).to(
+                self.device)
             identity[:, 0:nn_input.shape[1]] = nn_input
             out = identity + out
         elif self.case == 2:
@@ -463,7 +464,7 @@ class FFNN(torch.nn.Module):
             out = identity + out
 
         if self.clamp is not None:
-            out = torch.clamp(ou, tmin=-self.clamp, max=self.clamp)
+            out = torch.clamp(out, min=-self.clamp, max=self.clamp)
         return out
 
     @property
@@ -600,7 +601,7 @@ class NJODE(torch.nn.Module):
         self.hidden_size = hidden_size
 
         self.apply(init_weights)
-    
+
     @property
     def device(self):
         device = next(self.parameters()).device
@@ -752,9 +753,11 @@ class NJODE(torch.nn.Module):
         if dim_to is None:
             dim_to = data_dim
         if self.coord_wise_tau:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(self.device)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(
+                self.device)
         else:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(self.device)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(
+                self.device)
         current_time = 0.0
         loss = 0
         c_sig = None
@@ -1658,7 +1661,8 @@ class randomizedNJODE(torch.nn.Module):
         if dim_to is None:
             dim_to = data_dim
         if self.coord_wise_tau:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(self.device)
+            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(
+                self.device)
         else:
             tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(self.device)
         current_time = 0.0

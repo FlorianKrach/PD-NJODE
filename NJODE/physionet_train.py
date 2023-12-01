@@ -198,6 +198,10 @@ def train(
     args_dict["classif"] = False
     args_dict["eval_input_prob"] = eval_input_prob
     args_dict["eval_input_seed"] = eval_input_seed
+    if "obs_noise" in options:
+        args_dict["obs_noise"] = options["obs_noise"]
+    else:
+        args_dict["obs_noise"] = None
 
     data_objects = parse_dataset.parse_datasets(args, device)
 
@@ -472,7 +476,7 @@ def evaluate_model(model, dl_val, device, options, delta_t, T):
             num_obs += mask_val.sum()
             count += 1
             mse_val += mse_loss
-            # latent ODE takes mean over all dimensions (not only observed ones)
+            # latent ODE takes mean only over observed dimensions
             #   -> use their functions to compute mse
             mse_val_2 += torch.mean(
                 likelihood_eval.compute_masked_likelihood(

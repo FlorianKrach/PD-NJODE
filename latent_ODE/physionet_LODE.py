@@ -63,7 +63,7 @@ def get_data_min_max(records, device):
     data_min, data_max = None, None
     inf = torch.Tensor([float("Inf")])[0].to(device)
 
-    for b, (record_id, tt, vals, mask, labels) in enumerate(records):
+    for b, (record_id, tt, vals, mask, labels, noise) in enumerate(records):
         n_features = vals.size(-1)
 
         batch_min = []
@@ -118,7 +118,8 @@ class PhysioNet(object):
     labels_dict = {k: i for i, k in enumerate(labels)}
 
     def __init__(self, root, train=True, download=False,
-                 quantization=0.1, n_samples=None, device=torch.device("cpu")):
+                 quantization=0.1, n_samples=None, device=torch.device("cpu"),
+                 obs_noise=None):
 
         self.root = root
         self.train = train
@@ -154,12 +155,43 @@ class PhysioNet(object):
             self.data = self.data[:n_samples]
             self.labels = self.labels[:n_samples]
 
+        # FK: added
+        if obs_noise is None:
+            obs_noise = {'std_factor': 0., 'seed': 0}
+        np.random.seed(obs_noise['seed'])
+        if "stds" in obs_noise and obs_noise["stds"] is not None:
+            stds = obs_noise["stds"]
+        else:
+            stds = []
+            for i, p in enumerate(self.params):
+                dat = []
+                for j, (record_id, tt, vals, mask, labels) in enumerate(
+                        self.data):
+                    dat.append(vals[:, i][mask[:, i] == 1])
+                dat = np.concatenate(dat)
+                stds.append(np.std(dat))
+
+        data_new = []
+        for j, (record_id, tt, vals, mask, labels) in enumerate(
+                self.data):
+            noise = torch.zeros_like(vals)
+            for i, p in enumerate(self.params):
+                noise[:, i][mask[:, i] == 1] += torch.tensor(
+                    np.random.normal(
+                        0, obs_noise['std_factor'] * stds[i],
+                        len(vals[:, i][mask[:, i] == 1])),
+                    dtype=torch.float32)
+            data_new.append((record_id, tt, vals, mask, labels, noise))
+        self.data = data_new
+        self.stds = stds
+        self.obs_noise = obs_noise
+
+
     def download(self):
         if self._check_exists():
             return
 
-        self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
 
         os.makedirs(self.raw_folder, exist_ok=True)
         os.makedirs(self.processed_folder, exist_ok=True)
@@ -444,6 +476,7 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
     offset = 0
     combined_vals = torch.zeros([len(batch), len(combined_tt), D]).to(device)
     combined_mask = torch.zeros([len(batch), len(combined_tt), D]).to(device)
+    combined_noise = torch.zeros([len(batch), len(combined_tt), D]).to(device)
 
     combined_labels = None
     N_labels = 1
@@ -452,10 +485,11 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
         float('nan'))
     combined_labels = combined_labels.to(device=device)
 
-    for b, (record_id, tt, vals, mask, labels) in enumerate(batch):
+    for b, (record_id, tt, vals, mask, labels, noise) in enumerate(batch):
         tt = tt.to(device)
         vals = vals.to(device)
         mask = mask.to(device)
+        noise = noise.to(device)
         if labels is not None:
             labels = labels.to(device)
 
@@ -464,6 +498,7 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
 
         combined_vals[b, indices] = vals
         combined_mask[b, indices] = mask
+        combined_noise[b, indices] = noise
 
         if labels is not None:
             combined_labels[b] = labels
@@ -472,23 +507,33 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
                                                       combined_mask,
                                                       att_min=data_min,
                                                       att_max=data_max)
+    combined_noise, _, _ = utils.normalize_masked_data(
+        combined_noise,
+        combined_mask,
+        att_min=0.,  # FK: since the data is already shifted, we
+                     #   don't want to shift the noise, but only scale it
+        att_max=data_max)
 
     combined_tt = combined_tt / 48.  # FK: 48 is the max amount of time
 
     combined_mask = combined_mask.detach().numpy()
     combined_vals = combined_vals.detach().numpy()
+    combined_noise = combined_noise.detach().numpy()
     times = combined_tt.detach().numpy()
     times_val = None
     vals_val = None
     mask_val = None
+    noise_val = None
     if data_type == "test":
         n_times_obs = len(times) // 2
         times_val = times[n_times_obs:]
         vals_val = combined_vals[:, n_times_obs:, :]
         mask_val = combined_mask[:, n_times_obs:, :]
+        noise_val = combined_noise[:, n_times_obs:, :]
         times = times[:n_times_obs]
         combined_mask = combined_mask[:, :n_times_obs, :]
         combined_vals = combined_vals[:, :n_times_obs, :]
+        combined_noise = combined_noise[:, :n_times_obs, :]
     X = []
     M = []
     time_ptr = [0]
@@ -498,7 +543,7 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
         for i in range(len(batch)):
             if combined_mask[i, t_ind, :].sum() > 0:
                 counter += 1
-                X.append(combined_vals[i, t_ind, :])
+                X.append(combined_vals[i, t_ind, :]+combined_noise[i, t_ind, :])
                 M.append(combined_mask[i, t_ind, :])
                 obs_idx.append(i)
         time_ptr.append(counter)
@@ -514,7 +559,7 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
                 if mask_val[i, t_ind, :].sum() > 0:
                     if np.random.rand() < args.eval_input_prob:
                         counter += 1
-                        X.append(vals_val[i, t_ind, :])
+                        X.append(vals_val[i, t_ind, :]+noise_val[i, t_ind, :])
                         M.append(mask_val[i, t_ind, :])
                         obs_idx.append(i)
                         if first:
@@ -528,11 +573,14 @@ def variable_time_collate_fn1(batch, args, device=torch.device("cpu"),
         "batch_size": len(batch),
         'time_ptr': np.array(time_ptr),
         'obs_idx': torch.tensor(obs_idx, dtype=torch.long),
-        'X': torch.tensor(X, dtype=torch.float32),
-        'M': torch.tensor(M, dtype=torch.float32),
+        'X': torch.tensor(np.array(X), dtype=torch.float32),
+        'M': torch.tensor(np.array(M), dtype=torch.float32),
         "times_val": times_val,
         "vals_val": vals_val,
         "mask_val": mask_val,
+        "combined_vals": combined_vals,
+        "combined_mask": combined_mask,
+        "combined_noise": combined_noise,
     }
     # path dimension (of vals_val and mask_val):
     # 	[batch_size, time_steps, dimension]
@@ -544,6 +592,9 @@ if __name__ == '__main__':
 
     dataset = PhysioNet('../data/training_data/physionet', train=False,
                         download=True)
+
+
+
 
 # FK: the variable_time_collate_fn() needs args passed to it (hence doesn't
 # 	work here), compare with parse_datasets_LODE.py

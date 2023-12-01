@@ -131,13 +131,17 @@ def parse_datasets(args, device):
 		train_dataset_obj = PhysioNet('../data/training_data/physionet', train=True,
 										quantization = args.quantization,
 										download=True, n_samples = min(10000, args.n), 
-										device = device)
+										device = device, obs_noise=args.obs_noise)
+		obs_noise2 = {
+			"stds": train_dataset_obj.stds,
+			"seed": train_dataset_obj.obs_noise["seed"] + 1,
+			"std_factor": train_dataset_obj.obs_noise["std_factor"]}
 		# Use custom collate_fn to combine samples with arbitrary time observations.
 		# Returns the dataset along with mask and time steps
 		test_dataset_obj = PhysioNet('../data/training_data/physionet', train=False,
 										quantization = args.quantization,
 										download=True, n_samples = min(10000, args.n), 
-										device = device)
+										device = device, obs_noise=obs_noise2)
 
 		# Combine and shuffle samples from physionet Train and physionet Test
 		total_dataset = train_dataset_obj[:len(train_dataset_obj)]
@@ -151,13 +155,13 @@ def parse_datasets(args, device):
 		train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.8, 
 			random_state = 42, shuffle = True)
 
-		record_id, tt, vals, mask, labels = train_data[0]
+		record_id, tt, vals, mask, labels, noise = train_data[0]
 
 		n_samples = len(total_dataset)
 		input_dim = vals.size(-1)
 
 		batch_size = min(min(len(train_dataset_obj), args.batch_size), args.n)
-		data_min, data_max = get_data_min_max(total_dataset, device)
+		data_min, data_max = get_data_min_max(total_dataset, device=device)
 
 		train_dataloader = DataLoader(train_data, batch_size= batch_size, shuffle=False, 
 			collate_fn= lambda batch: variable_time_collate_fn1(batch, args, device, data_type = "train",

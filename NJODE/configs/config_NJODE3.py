@@ -150,6 +150,151 @@ plot_paths_BM_NoisyObs_dict = {
 
 
 
+# ------------------------------------------------------------------------------
+# --- physionet
+param_list_physio_N3 = []
+physio_models_path_N3 = "{}saved_models_PhysioNet_NJODE3/".format(data_path)
+_nn = ((50, 'tanh'),)
+
+param_dict_physio_N3_1 = {
+    'epochs': [100],
+    'batch_size': [50],
+    'save_every': [1],
+    'learning_rate': [0.001],
+    'test_size': [0.2],
+    'hidden_size': [50,],
+    'bias': [True],
+    'dropout_rate': [0.1],
+    'ode_nn': [_nn],
+    'readout_nn': [_nn],
+    'enc_nn': [_nn],
+    'use_rnn': [True,],
+    'solver': ["euler"],
+    'weight': [0.5],
+    'weight_decay': [1.],
+    'input_sig': [True],
+    'level': [2],
+    'dataset': ["physionet"],
+    'dataset_id': [None],
+    'which_loss': ['easy', 'noisy_obs'],
+    'quantization': [0.016],
+    'n_samples': [8000],
+    'saved_models_path': [physio_models_path_N3],
+    'obs_noise': [{"std_factor": 0.0, "seed": 333},
+                  {"std_factor": 0.2, "seed": 333},
+                  {"std_factor": 0.4, "seed": 333},
+                  {"std_factor": 0.6, "seed": 333},
+                  {"std_factor": 0.8, "seed": 333},
+                  {"std_factor": 1.0, "seed": 333},],
+}
+param_list_physio_N3 += get_parameter_array(param_dict=param_dict_physio_N3_1)
+
+overview_dict_physio_N3 = dict(
+    ids_from=1, ids_to=len(param_list_physio_N3),
+    path=physio_models_path_N3,
+    params_extract_desc=('dataset', 'network_size', 'nb_layers',
+                         'activation_function_1', 'use_rnn',
+                         'readout_nn', 'dropout_rate',
+                         'hidden_size', 'batch_size', 'which_loss',
+                         'input_sig', 'level', 'obs_noise',
+                         'obs_noise-std_factor'),
+    val_test_params_extract=(
+        ("max", "epoch", "epoch", "epochs_trained"),
+        ("min", "eval_metric_2",
+         "eval_metric_2", "evaluation_mse_min"),
+        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+    ),
+    sortby=["evaluation_mse_min"],
+)
+
+plot_loss_comparison_physio_N3 = dict(
+    filename="{}training_overview-ids-{}-{}.csv".format(
+                physio_models_path_N3, 1, len(param_list_physio_N3)),
+    param_combinations=({'which_loss': 'easy'}, {'which_loss': 'noisy_obs'}),
+    labels=('original', 'noise-adapted'),
+    outfile="{}loss_comparison.pdf".format(physio_models_path_N3),
+    xcol='obs_noise-std_factor', ycol='evaluation_mse_min',
+    xlabel="std. factor of observation noise",
+    ylabel="Evaluation MSE",
+    logx=False, logy=False,)
+
+
+# ------------------------------------------------------------------------------
+# --- climate
+param_list_climate_N3 = []
+climate_models_path_N3 = "{}saved_models_Climate/".format(data_path)
+for _nn in [((50, 'tanh'),), ]:
+    param_dict_climate_1 = {
+        'epochs': [200],
+        'batch_size': [100],
+        'save_every': [1],
+        'learning_rate': [0.001],
+        'test_size': [0.2],
+        'seed': [398],
+        'hidden_size': [50,],
+        'bias': [True],
+        'dropout_rate': [0.1],
+        'ode_nn': [_nn],
+        'readout_nn': [_nn],
+        'enc_nn': [_nn],
+        'use_rnn': [False, True,],
+        'solver': ["euler"],
+        'weight': [0.5],
+        'weight_decay': [1.],
+        'input_sig': [False, True],
+        'level': [2],
+        'dataset': ["climate"],
+        'data_index': [0, 1, 2, 3, 4],
+        'which_loss': ['easy', 'noisy_obs'],
+        'delta_t': [0.1],
+        'saved_models_path': [climate_models_path_N3],
+    }
+    param_list_climate_N3 += get_parameter_array(param_dict=param_dict_climate_1)
+
+overview_dict_climate_N3 = dict(
+    ids_from=1, ids_to=len(param_list_climate_N3),
+    path=climate_models_path_N3,
+    params_extract_desc=('data_index', 'network_size', 'nb_layers',
+                         'activation_function_1', 'use_rnn',
+                         'readout_nn', 'dropout_rate',
+                         'hidden_size', 'batch_size', 'which_loss',
+                         'input_sig', 'level', ),
+    val_test_params_extract=(
+        ("max", "epoch", "epoch", "epochs_trained"),
+        ("min", "eval_metric",
+         "test_metric", "test_metric_eval_min"),
+        ("min", "eval_metric", "eval_metric", "eval_metric_min"),
+        ("min", "test_metric", "test_metric", "test_metric_min"),
+        ("min", "eval_loss", "test_metric", "test_metric_eval_loss_min"),
+    ),
+    sortby=["data_index", "test_metric_eval_min"],
+)
+
+crossval_dict_climate_N3 = dict(
+    path=climate_models_path_N3, early_stop_after_epoch=100,
+    params_extract_desc=(
+        'dataset', 'network_size', 'dropout_rate', 'hidden_size',
+        'activation_function_1', 'input_sig', 'use_rnn', 'which_loss', ),
+    param_combinations=(
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': False,
+            'use_rnn': False, 'which_loss': 'easy',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': True,
+            'use_rnn': False, 'which_loss': 'easy',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': False,
+            'use_rnn': True, 'which_loss': 'easy',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': True,
+            'use_rnn': True, 'which_loss': 'easy',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': False,
+            'use_rnn': False, 'which_loss': 'noisy_obs',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': True,
+            'use_rnn': False, 'which_loss': 'noisy_obs',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': False,
+            'use_rnn': True, 'which_loss': 'noisy_obs',},
+        {'network_size': 50, 'hidden_size': 50, 'input_sig': True,
+            'use_rnn': True, 'which_loss': 'noisy_obs',},
+    ),
+)
+
 
 
 if __name__ == '__main__':
