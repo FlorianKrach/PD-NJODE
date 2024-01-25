@@ -207,6 +207,10 @@ def train(
 
     dl = data_objects["train_dataloader"]
     dl_test = data_objects["test_dataloader"]
+    print("="*100)
+    print("train size: {}, test size: {}".format(
+        len(dl.dataset), len(dl_test.dataset)))
+    print("="*100)
     input_size = data_objects["input_dim"]
     output_size = input_size
     T = 1 + 1e-12
