@@ -5,7 +5,7 @@
 This repository is the official implementation of the papers 
 - [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
 and 
-- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147) 
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
 
 which are the second and third part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -18,7 +18,7 @@ All experiments from the first paper can be run with this repo as well (see
 The experiments from the second paper [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
 can be run with the [Instructions for NJODE2](#instructions-for-running-experiments-of-optimal-estimation-of-generic-dynamics-by-path-dependent-neural-jump-odes).
 
-The experiments from the third paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147)
+The experiments from the third paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1)
 can be run with the [Instructions for NJODE3](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework).
 
 
@@ -60,15 +60,18 @@ please cite our papers:
     ```
 
 
-- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147)
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1)
 
     ```
-    @article{ExtPDNJODE,
-      url={https://arxiv.org/abs/2307.13147},
-      title={{Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework}},
-      author={Andersson, William and Heiss, Jakob and Krach, Florian and Teichmann, Josef},
-      journal={arXiv},
-      year={2023}
+    @article{
+      andersson2024extending,
+      title={Extending Path-Dependent {NJ}-{ODE}s to Noisy Observations and a Dependent Observation Framework},
+      author={William Andersson and Jakob Heiss and Florian Krach and Josef Teichmann},
+      journal={Transactions on Machine Learning Research},
+      issn={2835-8856},
+      year={2024},
+      url={https://openreview.net/forum?id=0T2OTVCCC1},
+      note={}
     }
     ```
 
@@ -395,7 +398,7 @@ python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id
 --------------------------------------------------------------------------------
 # Instructions for Running Experiments of Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework
 
-The code for the experiments of the paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://arxiv.org/abs/2307.13147).
+The code for the experiments of the paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1).
 
 The configs for these experiments are in [config_NJODE3.py](NJODE/configs/config_NJODE3.py).
 
