@@ -205,6 +205,7 @@ python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_3
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_3_2
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_4
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_4_2
+python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_5
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_6
 python data_utils.py --dataset_name=LOB --dataset_params=LOB_dict_K_6_2
 ```

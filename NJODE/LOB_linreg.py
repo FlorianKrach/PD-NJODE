@@ -198,11 +198,14 @@ if __name__ == '__main__':
     train_rf(data_dict="LOB_dict_K_3", use_midprice_only=True,
              n_estimators=100, max_depth=2 ** 3, n_jobs=-1, last_x_times=3)
     print("="*80)
+    train_linreg(data_dict="LOB_dict_K_5", use_midprice_only=False)
     train_linreg(data_dict="LOB_dict_K_6", use_midprice_only=False)
     train_linreg(data_dict="LOB_dict_K_6", use_midprice_only=True)
     train_linreg(data_dict="LOB_dict_K_6", use_midprice_only=True, last_x_times=10)
     train_linreg(data_dict="LOB_dict_K_6", use_midprice_only=True, last_x_times=1)
     train_linreg(data_dict="LOB_dict_K_6", use_midprice_only=True, last_x_times=0)
+    train_rf(data_dict="LOB_dict_K_5", use_midprice_only=False,
+             n_estimators=100, max_depth=2 ** 3, n_jobs=-1, last_x_times=10)
     train_rf(data_dict="LOB_dict_K_6", use_midprice_only=False,
              n_estimators=100, max_depth=2 ** 3, n_jobs=-1, last_x_times=10)
     train_rf(data_dict="LOB_dict_K_6", use_midprice_only=True,

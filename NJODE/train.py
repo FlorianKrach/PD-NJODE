@@ -144,8 +144,8 @@ def train(
     :param saved_models_path: str, where to save the models
     :param options: kwargs, used keywords:
             'test_data_dict'    None, str or dict, if no None, this data_dict is
-                            used to define the dataset for testing and
-                            evaluation
+                            used to define the dataset for plot_only and
+                            evaluation (if evaluate=True)
             'func_appl_X'   list of functions (as str, see data_utils)
                             to apply to X
             'masked'        bool, whether the data is masked (i.e. has
@@ -165,9 +165,22 @@ def train(
             'plot_obs_prob' bool, whether to plot the observation probability
             'which_loss'    'standard' or 'easy', used by models.NJODE
             'residual_enc_dec'  bool, whether resNNs are used for encoder and
-                            readout NN, used by models.NJODE, default True
+                            readout NN, used by models.NJODE. the provided value
+                            is overwritten by 'residual_enc' & 'residual_dec' if
+                            they are provided. default: False
+            'residual_enc'  bool, whether resNNs are used for encoder NN,
+                            used by models.NJODE.
+                            default: True if use_rnn=False, else: False (this is
+                            for backward compatibility)
+            'residual_dec'  bool, whether resNNs are used for readout NN,
+                            used by models.NJODE. default: True
             'use_y_for_ode' bool, whether to use y (after jump) or x_impute for
                             the ODE as input, only in masked case, default: True
+            'use_current_y_for_ode' bool, whether to use the current y as input
+                            to the ode. this should make the training more
+                            stable in the case of long windows without
+                            observations (cf. literature about stable output
+                            feedback). default: False
             'coord_wise_tau'    bool, whether to use a coordinate wise tau
             'input_sig'     bool, whether to use the signature as input
             'level'         int, level of the signature that is used
@@ -197,9 +210,31 @@ def train(
                             controlled ODE-RNN model.
                             Other options/inputs might change or loose their
                             effect.
+            'use_observation_as_input'  bool, whether to use the observations as
+                            input to the model or whether to only use them for
+                            the loss function (this can be used to make the
+                            model learn to predict well far into the future).
+                            can be a float in (0,1) to use an observation with
+                            this probability as input. can also be a string
+                            defining a function (when evaluated) that takes the
+                            current epoch as input and returns a bool whether to
+                            use the current observation as input (this can be a
+                            random function, i.e. the output can depend on
+                            sampling a random variable). default: true
+            'val_use_observation_as_input'  bool, None, float or str, same as
+                            'use_observation_as_input', but for the validation
+                            set. default: None, i.e. same as for training set
             'ode_input_scaling_func'    None or str in {'id', 'tanh'}, the
                             function used to scale inputs to the neuralODE.
                             default: tanh
+            'use_cond_exp'  bool, whether to use the conditional expectation
+                            as reference for model evaluation, default: True
+            'eval_use_true_paths'   bool, whether to use the true paths for
+                            evaluation (instead of the conditional expectation)
+                            default: False
+            'which_eval_loss'   str, see models.LOSS_FUN_DICT for choices, which
+                            loss to use for evaluation, default: 'standard'
+
                 -> 'GRU_ODE_Bayes' has the following extra options with the
                     names 'GRU_ODE_Bayes'+<option_name>, for the following list
                     of possible choices for <options_name>:
@@ -250,6 +285,9 @@ def train(
     use_cond_exp = True
     if 'use_cond_exp' in options:
         use_cond_exp = options['use_cond_exp']
+    eval_use_true_paths = False
+    if 'eval_use_true_paths' in options:
+        eval_use_true_paths = options['eval_use_true_paths']
 
     masked = False
     if 'masked' in options and 'other_model' not in options:
@@ -316,7 +354,7 @@ def train(
         test_ds, test_ds_id = data_utils._get_dataset_name_id_from_dict(
             data_dict=test_data_dict)
         test_ds_id = int(test_ds_id)
-        data_val = data_utils.IrregularDataset(
+        data_test = data_utils.IrregularDataset(
             model_name=test_ds, time_id=test_ds_id, idx=None)
 
     # get data-loader for training
@@ -336,6 +374,21 @@ def train(
     dl_val = DataLoader(  # class to iterate over validation data
         dataset=data_val, collate_fn=collate_fn,
         shuffle=False, batch_size=len(data_val), num_workers=N_DATASET_WORKERS)
+    stockmodel = data_utils._STOCK_MODELS[
+        dataset_metadata['model_name']](**dataset_metadata)
+    if test_data_dict is not None:
+        dl_test = DataLoader(  # class to iterate over test data
+            dataset=data_test, collate_fn=collate_fn,
+            shuffle=False, batch_size=len(data_test),
+            num_workers=N_DATASET_WORKERS)
+        testset_metadata = data_utils.load_metadata(
+            stock_model_name=test_ds, time_id=test_ds_id)
+        stockmodel_test = data_utils._STOCK_MODELS[
+            testset_metadata['model_name']](**testset_metadata)
+    else:
+        dl_test = dl_val
+        stockmodel_test = stockmodel
+        testset_metadata = dataset_metadata
 
     # get additional plotting information
     plot_variance = False
@@ -359,8 +412,6 @@ def train(
     #   -> if other functions are applied to X, then only the original X is used
     #      in the computation of the optimal eval loss
     print(dataset_metadata)
-    stockmodel = data_utils._STOCK_MODELS[
-        dataset_metadata['model_name']](**dataset_metadata)
     if use_cond_exp:
         opt_eval_loss = compute_optimal_eval_loss(
             dl_val, stockmodel, delta_t, T, mult=mult)
@@ -379,10 +430,11 @@ def train(
         'use_rnn': use_rnn,
         'dropout_rate': dropout_rate, 'batch_size': batch_size,
         'solver': solver, 'dataset': dataset, 'dataset_id': dataset_id,
+        'data_dict': data_dict,
         'learning_rate': learning_rate, 'test_size': test_size, 'seed': seed,
         'weight': weight, 'weight_decay': weight_decay,
         'optimal_eval_loss': opt_eval_loss, 'options': options}
-    desc = json.dumps(params_dict, sort_keys=True)  # serialize to a JSON formatted str
+    desc = json.dumps(params_dict, sort_keys=True)
 
     # get overview file
     resume_training = False
@@ -501,6 +553,12 @@ def train(
     if 'gradient_clip' in options:
         gradient_clip = options["gradient_clip"]
 
+    # evaluation loss function
+    which_eval_loss = 'standard'
+    if 'which_eval_loss' in options:
+        which_eval_loss = options['which_eval_loss']
+    assert which_eval_loss in models.LOSS_FUN_DICT
+
     # load saved model if wanted/possible
     best_eval_loss = np.infty
     if 'evaluate' in options and options['evaluate']:
@@ -532,20 +590,24 @@ def train(
 
     # ---------- plot only option ------------
     if 'plot_only' in options and options['plot_only']:
-        for i, b in enumerate(dl_val):
+        for i, b in enumerate(dl_test):
             batch = b
         model.epoch -= 1
         initial_print += '\nplotting ...'
         plot_filename = 'demo-plot_epoch-{}'.format(model.epoch)
         plot_filename = plot_filename + '_path-{}.pdf'
+        reuse_cond_exp = True
+        if dl_test != dl_val:
+            reuse_cond_exp = False
         curr_opt_loss = plot_one_path_with_pred(
-            device, model, batch, stockmodel, delta_t, T,
+            device, model, batch, stockmodel_test,
+            testset_metadata['dt'], testset_metadata['maturity'],
             path_to_plot=paths_to_plot, save_path=plot_save_path,
             filename=plot_filename, plot_variance=plot_variance,
             functions=functions, std_factor=std_factor,
             model_name=model_name, save_extras=save_extras, ylabels=ylabels,
             same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
-            dataset_metadata=dataset_metadata)
+            dataset_metadata=testset_metadata, reuse_cond_exp=reuse_cond_exp,)
         if SEND:
             files_to_send = []
             caption = "{} - id={}".format(model_name, model_id)
@@ -625,7 +687,8 @@ def train(
                 hT, loss = model(
                     times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
                     delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
-                    return_path=False, get_loss=True, M=M, start_M=start_M)
+                    return_path=False, get_loss=True, M=M, start_M=start_M,
+                    epoch=model.epoch)
             elif options['other_model'] == "randomizedNJODE":
                 linreg_X_, linreg_y_ = model.get_Xy_reg(
                     times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
@@ -692,7 +755,7 @@ def train(
                     hT, c_loss = model(
                         times, time_ptr, X, obs_idx, delta_t, T, start_X,
                         n_obs_ot, return_path=False, get_loss=True, M=M,
-                        start_M=start_M, which_loss='standard')
+                        start_M=start_M, which_loss=which_eval_loss,)
                 elif options['other_model'] == "GRU_ODE_Bayes":
                     if M is None:
                         M = torch.ones_like(X)
@@ -712,22 +775,45 @@ def train(
                         hT_corrected, c_loss_corrected = model(
                             times, time_ptr, X, obs_idx, delta_t, T, start_X,
                             n_obs_ot, return_path=False, get_loss=True, M=M,
-                            start_M=start_M, which_loss='standard',
+                            start_M=start_M, which_loss=which_eval_loss,
                             dim_to=dimension)
                     loss_val_corrected += c_loss_corrected.detach().numpy()
 
-                # mean squared difference evaluation
-                if 'evaluate' in options and options['evaluate']:
-                    if use_cond_exp:
+            # mean squared difference evaluation
+            if 'evaluate' in options and options['evaluate']:
+                for i, b in enumerate(dl_test):
+                    times = b["times"]
+                    time_ptr = b["time_ptr"]
+                    X = b["X"].to(device)
+                    M = b["M"]
+                    if M is not None:
+                        M = M.to(device)
+                    start_M = b["start_M"]
+                    if start_M is not None:
+                        start_M = start_M.to(device)
+
+                    start_X = b["start_X"].to(device)
+                    obs_idx = b["obs_idx"]
+                    n_obs_ot = b["n_obs_ot"].to(device)
+                    true_paths = b["true_paths"]
+                    true_mask = b["true_mask"]
+
+                    if use_cond_exp and not eval_use_true_paths:
                         true_paths = None
                         true_mask = None
+                    use_stored_cond_exp = True
+                    if dl_test != dl_val:
+                        use_stored_cond_exp = False
                     _eval_msd = model.evaluate(
                         times=times, time_ptr=time_ptr, X=X,
-                        obs_idx=obs_idx, delta_t=delta_t, T=T,
+                        obs_idx=obs_idx,
+                        delta_t=testset_metadata["dt"],
+                        T=testset_metadata["maturity"],
                         start_X=start_X, n_obs_ot=n_obs_ot,
-                        stockmodel=stockmodel, return_paths=False, M=M,
+                        stockmodel=stockmodel_test, return_paths=False, M=M,
                         start_M=start_M, true_paths=true_paths,
-                        true_mask=true_mask, mult=mult)
+                        true_mask=true_mask, mult=mult,
+                        use_stored_cond_exp=use_stored_cond_exp,)
                     eval_msd += _eval_msd
 
             eval_time = time.time() - t
@@ -856,6 +942,7 @@ def plot_one_path_with_pred(
         save_extras={'bbox_inches': 'tight', 'pad_inches': 0.01},
         use_cond_exp=True, same_yaxis=False,
         plot_obs_prob=False, dataset_metadata=None,
+        reuse_cond_exp=True,
 ):
     """
     plot one path of the stockmodel together with optimal cond. exp. and its
@@ -886,6 +973,8 @@ def plot_one_path_with_pred(
         observation for all times
     :param dataset_metadata: needed if plot_obs_prob=true, the metadata of the
         used dataset to extract the observation probability
+    :param reuse_cond_exp: bool, whether to reuse the conditional expectation
+        from the last computation
     :return: optimal loss
     """
     if model_name is None or model_name == "NJODE":
@@ -944,12 +1033,15 @@ def plot_one_path_with_pred(
             times, time_ptr, X.detach().numpy(), obs_idx.detach().numpy(),
             delta_t, T, start_X.detach().numpy(), n_obs_ot.detach().numpy(),
             return_path=True, get_loss=True, weight=model.weight,
-            M=M,)
+            M=M, store_and_use_stored=reuse_cond_exp)
     else:
         opt_loss = 0
 
+    # # recreate data
+    # recr_t, recr_X = model.recreate_data(times, time_ptr, X, obs_idx, start_X)
+
     for i in path_to_plot:
-        fig, axs = plt.subplots(dim)
+        fig, axs = plt.subplots(dim, sharex=True)
         if dim == 1:
             axs = [axs]
         for j in range(dim):
@@ -977,6 +1069,8 @@ def plot_one_path_with_pred(
             if obs_noise is not None:
                 axs[j].scatter(path_t_obs, path_O_obs, label='observed',
                                color=colors[0])
+                # axs[j].scatter(recr_t, recr_X[i, :, j],label='observed recr.',
+                #                color="black", marker="x")
                 axs[j].scatter(path_t_obs, path_X_obs,
                                label='true value at obs time',
                                color=colors[2], marker='*')
@@ -1029,7 +1123,7 @@ def plot_one_path_with_pred(
                 ax2.set_ylabel("observation probability")
                 axs[j].set_ylabel("$X$")
                 ax2.legend()
-                axs[j].set_xlabel("$t$")
+                # axs[j].set_xlabel("$t$")
             if ylabels:
                 axs[j].set_ylabel(ylabels[j])
             if same_yaxis:

@@ -95,6 +95,12 @@ LOB_dict_K_4_2 = {
     'use_volume': True, 'normalize': True, 'shift': 110,
 }
 
+LOB_dict_K_5 = {
+    'model_name': "LOB", "which_raw_data": "ETH_1sec",
+    'LOB_level': 10, 'amount_obs': 100, 'eval_predict_steps': [10,],
+    'use_volume': True, 'normalize': False, 'shift': 110,
+}
+
 LOB_dict_K_6 = {
     'model_name': "LOB", "which_raw_data": "ETH_1sec",
     'LOB_level': 10, 'amount_obs': 100, 'eval_predict_steps': [10,],
@@ -147,7 +153,6 @@ param_dict_LOB1 = {
     'paths_to_plot': [(0,1,2,3,4,)],
     'output_midprice_only': [False,],
     'use_eval_on_train': [False],
-    'residual_enc_dec': [True,],
     'classifier_nn': [_nn],
     'classifier_loss_weight': [1.,],
     'saved_models_path': [LOB_models_path],
@@ -182,7 +187,6 @@ param_dict_LOB2 = {
     'paths_to_plot': [(0,1,2,3,4,)],
     'output_midprice_only': [False,],
     'use_eval_on_train': [False],
-    'residual_enc_dec': [True,],
     'classifier_nn': [_nn],
     'classifier_loss_weight': [1.,],
     'saved_models_path': [LOB_models_path],
