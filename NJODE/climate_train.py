@@ -209,7 +209,7 @@ def train(
     if not os.path.exists(csv_file_path):
         print("climate data not found -> dowloading ...")
         zip_file = wget.download(
-            "https://polybox.ethz.ch/index.php/s/cbgmCCef6mm79Uu/download",
+            "https://drive.google.com/uc?export=download&id=120mlR51qRQukCQZjswklstBCE0diIBIG",
             config.training_data_path)
         print("extracting zip ...")
         with ZipFile(zip_file, 'r') as zipObj:
