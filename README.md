@@ -3,23 +3,22 @@
 [![DOI](https://zenodo.org/badge/507857738.svg)](https://zenodo.org/badge/latestdoi/507857738)
 
 This repository is the official implementation of the papers 
-- [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
-and 
-- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) ([intuitive video summary](https://www.youtube.com/watch?v=PSglx3a3bBI))
+- [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284)
+- [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
+- [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
 
-which are the second and third part of the series of works on Neural Jump ODEs that started with
+which are part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
 
 The code is based on the [code of the first paper](https://github.com/HerreraKrachTeichmann/NJODE), 
 but was developed further such that it is more user-friendly. 
 All experiments from the first paper can be run with this repo as well (see 
-[Instructions for NJODE](#instructions-for-running-experiments-of-neural-jump-ordinary-differential-equations)).
+[Instructions for Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](#instructions-for-running-experiments-of-neural-jump-ordinary-differential-equations)).
 
-The experiments from the second paper [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284) 
-can be run with the [Instructions for NJODE2](#instructions-for-running-experiments-of-optimal-estimation-of-generic-dynamics-by-path-dependent-neural-jump-odes).
-
-The experiments from the third paper [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1)
-can be run with the [Instructions for NJODE3](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework).
+The experiments from the follow-up papers can be run with:
+- [Instructions for Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](#instructions-for-running-experiments-of-optimal-estimation-of-generic-dynamics-by-path-dependent-neural-jump-odes)
+- [Instructions for Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework)
+- [Instructions for Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](#instructions-for-running-experiments-of-learning-chaotic-systems-and-long-term-predictions-with-neural-jump-odes)
 
 
 ## Requirements
@@ -61,31 +60,42 @@ please cite our papers:
 
 
 - [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1)
-
     ```
     @article{
-      andersson2024extending,
-      title={Extending Path-Dependent {NJ}-{ODE}s to Noisy Observations and a Dependent Observation Framework},
-      author={William Andersson and Jakob Heiss and Florian Krach and Josef Teichmann},
-      journal={Transactions on Machine Learning Research},
-      issn={2835-8856},
+        andersson2024extending,
+        title={Extending Path-Dependent {NJ}-{ODE}s to Noisy Observations and a Dependent Observation Framework},
+        author={William Andersson and Jakob Heiss and Florian Krach and Josef Teichmann},
+        journal={Transactions on Machine Learning Research},
+        issn={2835-8856},
+        year={2024},
+        url={https://openreview.net/forum?id=0T2OTVCCC1},
+        note={}
+    }
+    ```
+  
+- [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
+    ```
+    @misc{krach2024learningchaoticsystemslongterm,
+      title={Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs}, 
+      author={Florian Krach and Josef Teichmann},
       year={2024},
-      url={https://openreview.net/forum?id=0T2OTVCCC1},
-      note={}
+      eprint={2407.18808},
+      archivePrefix={arXiv},
+      primaryClass={stat.ML},
+      url={https://arxiv.org/abs/2407.18808},
     }
     ```
 
 
 - [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR)
-
     ```
     @inproceedings{
-    herrera2021neural,
-    title={Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering},
-    author={Calypso Herrera and Florian Krach and Josef Teichmann},
-    booktitle={International Conference on Learning Representations},
-    year={2021},
-    url={https://openreview.net/forum?id=JFKR3WqwyXR}
+        herrera2021neural,
+        title={Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering},
+        author={Calypso Herrera and Florian Krach and Josef Teichmann},
+        booktitle={International Conference on Learning Representations},
+        year={2021},
+        url={https://openreview.net/forum?id=JFKR3WqwyXR}
     }
     ```
 
@@ -112,7 +122,7 @@ The GIFs of the training progress were generated with imageio:
 
 
 --------------------------------------------------------------------------------
-# Instructions for running experiments of Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs
+# Instructions for Running Experiments of Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs
 
 The configs for the experiment are in the main config file [config.py](NJODE/configs/config.py) as well as in [config_LOB.py](NJODE/configs/config_LOB.py), [config_NJmodel.py](NJODE/configs/config_NJmodel.py) and [config_randomizedNJODE.py](NJODE/configs/config_randomizedNJODE.py).
 
@@ -288,7 +298,7 @@ train PD-NJODE on DoublePendulum:
 ```shell
 python run.py --params=param_list_DP --NB_JOBS=40 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_DP
 python run.py --plot_paths=plot_paths_DP_dict
-python run.py --params=param_list_DP --NB_JOBS=40 --saved_models_path="../data/saved_models_DoublePendulum/" --overwrite_params="{'test_data_dict': 'DP_dict3_test'}"
+python run.py --params=param_list_DP --NB_JOBS=40 --first_id=1 --saved_models_path="../data/saved_models_DoublePendulum/" --overwrite_params="{'test_data_dict': 'DP_dict3_test'}"
 python run.py --plot_paths=plot_paths_DP_dict
 ```
 
@@ -448,6 +458,40 @@ train model for noisy observations on Climate datasets:
 python run.py --params=param_list_climate_N3 --NB_JOBS=40 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_climate_N3 --crossval=crossval_dict_climate_N3
 ```
 
+
+
+--------------------------------------------------------------------------------
+# Instructions for Running Experiments of Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs
+
+The code for the experiments of the paper [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808).
+
+The configs for these experiments are in [config_ODE.py](NJODE/configs/config_ODE.py).
+
+
+generate datasets:
+```shell
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict3_2_test --seed=3
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict4
+python data_utils.py --dataset_name=DoublePendulum --dataset_params=DP_dict4_test --seed=3
+
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_LT_dict
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_LT_dict1
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_LT_dict_test --seed=3
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_LT_dict2
+python data_utils.py --dataset_name=BlackScholes --dataset_params=BS_LT_dict2_test --seed=3
+```
+
+train PD-NJODE on DoublePendulum:
+```shell
+python run.py --params=param_list_ODE_DP --NB_JOBS=14 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_ODE_DP
+python run.py --plot_paths=plot_paths_ODE_DP_dict
+```
+
+train model on BlackScholes dataset for long-term forecasting:
+```shell
+python run.py --params=param_list_BS_LT --NB_JOBS=4 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_BS_LT
+python run.py --plot_paths=plot_paths_BS_LT_dict
+```
 
 
 
