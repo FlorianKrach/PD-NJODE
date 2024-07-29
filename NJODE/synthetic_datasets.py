@@ -1880,40 +1880,7 @@ DATASETS = {
 # ==============================================================================
 
 
-hyperparam_test_stock_models = {
-    'drift': 0.2, 'volatility': 0.3, 'mean': 0.5, "poisson_lambda": 3.,
-    'speed': 0.5, 'correlation': 0.5, 'nb_paths': 10, 'nb_steps': 100,
-    'S0': 1, 'maturity': 1., 'dimension': 1}
-
-
-def draw_stock_model(stock_model_name):
-    hyperparam_test_stock_models['model_name'] = stock_model_name
-    stockmodel = DATASETS[stock_model_name](**hyperparam_test_stock_models)
-    stock_paths, dt = stockmodel.generate_paths()
-    filename = '{}.pdf'.format(stock_model_name)
-
-    # draw a path
-    one_path = stock_paths[0, 0, :]
-    dates = np.array([i for i in range(len(one_path))])
-    cond_exp = np.zeros(len(one_path))
-    cond_exp[0] = hyperparam_test_stock_models['S0']
-    cond_exp_const = hyperparam_test_stock_models['S0']
-    for i in range(1, len(one_path)):
-        if i % 3 == 0:
-            cond_exp[i] = one_path[i]
-        else:
-            cond_exp[i] = cond_exp[i - 1] * exp(
-                hyperparam_test_stock_models['drift'] * dt)
-
-    plt.plot(dates, one_path, label='stock path')
-    plt.plot(dates, cond_exp, label='conditional expectation')
-    plt.legend()
-    plt.savefig(filename)
-    plt.close()
-
-
 if __name__ == '__main__':
-    # draw_stock_model("BlackScholes")
 
     # ------------------------------
     # sm = FracBM(1, 100, 0, 1, 0.05)
