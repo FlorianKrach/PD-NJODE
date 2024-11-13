@@ -5,6 +5,7 @@ This is mainly a copy of:
 # Latent ODEs for Irregularly-Sampled Time Series
 # Authors: Yulia Rubanova and Ricky Chen
 with the licence:
+
 # MIT License
 #
 # Copyright (c) 2019 Yulia Rubanova
@@ -26,17 +27,14 @@ with the licence:
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+
 Some minor changes were made to adapt to our settings.
 """
 ###########################
 
-import os
-import numpy as np
-
 import torch
 import sys
 
-from torch.distributions import uniform
 from torch.utils.data import DataLoader
 
 # from generate_timeseries import Periodic_1d
@@ -44,11 +42,10 @@ from torch.utils.data import DataLoader
 # from person_activity import PersonActivity, variable_time_collate_fn_activity
 
 from sklearn import model_selection
-import random
 
-sys.path.append("../")
-import latent_ODE.utils_LODE as utils
-from latent_ODE.physionet_LODE import PhysioNet, variable_time_collate_fn1, get_data_min_max
+sys.path.append("../../")
+import baselines.latent_ODE.utils_LODE as utils
+from baselines.latent_ODE.physionet_LODE import PhysioNet, variable_time_collate_fn1, get_data_min_max
 
 #####################################################################################################
 def parse_datasets(args, device):

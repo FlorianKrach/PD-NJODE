@@ -23,8 +23,8 @@ import sys
 import socket
 import matplotlib.colors
 
-sys.path.append("../")
-sys.path.append("../NJODE/")
+sys.path.append("../../")
+sys.path.append("../../NJODE/")
 import configs.config as config
 import NJODE.data_utils as data_utils
 

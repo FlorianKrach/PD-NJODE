@@ -5,6 +5,7 @@ This is mainly a copy of:
 # Latent ODEs for Irregularly-Sampled Time Series
 # Authors: Yulia Rubanova and Ricky Chen
 with the licence:
+
 # MIT License
 #
 # Copyright (c) 2019 Yulia Rubanova
@@ -26,6 +27,7 @@ with the licence:
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+
 Some minor changes were made to adapt to our settings.
 Added:
 - variable_time_collate_fn1
@@ -39,12 +41,10 @@ import sys, socket
 import numpy as np
 import tarfile
 import torch
-from torch.utils.data import DataLoader
 from torchvision.datasets.utils import download_url
 
-sys.path.append("../")
-import latent_ODE.utils_LODE as utils
-from latent_ODE.utils_LODE import get_device
+sys.path.append("../../")
+import baselines.latent_ODE.utils_LODE as utils
 
 if 'ada-' not in socket.gethostname():
     SERVER = False

@@ -24,8 +24,8 @@ import gc
 sys.path.append("../")
 from configs import config
 import models
-import latent_ODE.parse_datasets_LODE as parse_dataset
-import latent_ODE.likelihood_eval_LODE as likelihood_eval
+import baselines.latent_ODE.parse_datasets_LODE as parse_dataset
+import baselines.latent_ODE.likelihood_eval_LODE as likelihood_eval
 
 
 try:

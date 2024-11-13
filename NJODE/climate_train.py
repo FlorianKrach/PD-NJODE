@@ -26,8 +26,8 @@ from zipfile import ZipFile
 from configs import config
 import models
 sys.path.append("../")
-import GRU_ODE_Bayes.data_utils_gru_ode_bayes as data_utils_gru
-import GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
+import baselines.GRU_ODE_Bayes.data_utils_gru_ode_bayes as data_utils_gru
+import baselines.GRU_ODE_Bayes.models_gru_ode_bayes as models_gru_ode_bayes
 
 
 try:

@@ -25,25 +25,19 @@
 # SOFTWARE.
 ###########################
 
-import gc, sys
-import numpy as np
-import sklearn as sk
-import numpy as np
+import sys
 #import gc
 import torch
 import torch.nn as nn
-from torch.nn.functional import relu
 
 # from lib.encoder_decoder import *
 # from lib.likelihood_eval import *
 
-from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal
-from torch.distributions import kl_divergence, Independent
+from torch.distributions import Independent
 
-sys.path.append("../")
-import latent_ODE.utils_LODE as utils
-from latent_ODE.utils_LODE import get_device
+sys.path.append("../../")
+from baselines.latent_ODE.utils_LODE import get_device
 
 
 
