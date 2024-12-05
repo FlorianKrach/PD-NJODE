@@ -57,8 +57,8 @@ data_path = config.data_path
 saved_models_path = config.saved_models_path
 flagfile = config.flagfile
 
-METR_COLUMNS = ['epoch', 'train_time', 'eval_time', 'train_loss',
-                'eval_loss', 'mse_eval_loss', 'classification_eval_loss']
+METR_COLUMNS = ['epoch', 'train_time', 'val_time', 'train_loss',
+                'val_loss', 'mse_val_loss', 'classification_val_loss']
 
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -165,7 +165,7 @@ def train(
                             of samples used for the training set (randomly
                             selected out of original training set)
             'evaluate'      bool, whether to evaluate the model in the test set
-                            (i.e. not only compute the eval_loss, but also
+                            (i.e. not only compute the val_loss, but also
                             compute the mean difference between the true and the
                             predicted paths comparing at each time point)
             'load_best'     bool, whether to load the best checkpoint instead of
@@ -386,7 +386,7 @@ def train(
         model.parameters(), lr=learning_rate, weight_decay=0.0005)
 
     # load saved model if wanted/possible
-    best_eval_loss = np.infty
+    best_val_loss = np.infty
     if 'evaluate' in options and options['evaluate']:
         metr_columns = METR_COLUMNS + [
             'evaluation_mse', 'ref_evaluation_mse', 'evaluation_f1score']
@@ -402,9 +402,9 @@ def train(
                 models.get_ckpt_model(model_path_save_last, model, optimizer,
                                       device)
             df_metric = pd.read_csv(model_metric_file, index_col=0)
-            best_eval_loss = np.min(df_metric['eval_loss'].values)
+            best_val_loss = np.min(df_metric['val_loss'].values)
             if 'evaluation_mse' in df_metric.columns:
-                best_eval_loss = np.min(df_metric['evaluation_mse'].values)
+                best_val_loss = np.min(df_metric['evaluation_mse'].values)
             model.epoch += 1
             model.weight_decay_step()
             initial_print += '\nepoch: {}, weight: {}'.format(
@@ -691,7 +691,7 @@ def train(
                     if _eval_f1score is not None:
                         eval_f1score += _eval_f1score
 
-            eval_time = time.time() - t
+            val_time = time.time() - t
             loss_val = loss_val / num_obs
             mse_loss_val = mse_loss_val / num_obs
             cl_loss_val = cl_loss_val / num_obs
@@ -717,7 +717,7 @@ def train(
                           true_labels, predicted_labels))
 
         if 'evaluate' in options and options['evaluate']:
-            metric_app.append([model.epoch, train_time, eval_time, train_loss,
+            metric_app.append([model.epoch, train_time, val_time, train_loss,
                                loss_val, mse_loss_val, cl_loss_val,
                                eval_msd, ref_eval_msd, eval_f1score])
             eval_string = "evaluation mean square differences: k={}, " \
@@ -730,7 +730,7 @@ def train(
             print(eval_string_f1)
             loss_to_compare = eval_msd
         else:
-            metric_app.append([model.epoch, train_time, eval_time, train_loss,
+            metric_app.append([model.epoch, train_time, val_time, train_loss,
                                loss_val, mse_loss_val, cl_loss_val])
             loss_to_compare = loss_val
 
@@ -757,10 +757,10 @@ def train(
                                    model.epoch)
             metric_app = []
             print('saved!')
-        if loss_to_compare < best_eval_loss:
+        if loss_to_compare < best_val_loss:
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
-                best_eval_loss, loss_to_compare, model.epoch))
+                best_val_loss, loss_to_compare, model.epoch))
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
             df_metric.to_csv(model_metric_file)
@@ -769,7 +769,7 @@ def train(
             models.save_checkpoint(model, optimizer, model_path_save_best,
                                    model.epoch)
             metric_app = []
-            best_eval_loss = loss_to_compare
+            best_val_loss = loss_to_compare
             print('saved!')
         print("-"*100)
 
@@ -860,7 +860,7 @@ def plot_one_path_with_pred(
     model.eval()  # put model in evaluation mode
     res = model.get_pred(
         times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx, delta_t=delta_t,
-        T=T, start_X=start_X, M=M, start_M=start_M)
+        T=T, start_X=start_X, M=M, start_M=start_M, n_obs_ot=n_obs_ot,)
     path_y_pred = res['pred'].detach().numpy()
     path_t_pred = res['pred_t']
 

@@ -56,6 +56,9 @@ flags.DEFINE_string("plot_conv_study", None,
 flags.DEFINE_string("plot_loss_comparison", None,
                     "name of the dict (in config.py) defining input for "
                     "extras.plot_loss_comparison")
+flags.DEFINE_string("plot_losses", None,
+                    "name of the dict (in config.py) defining input for "
+                    "extras.plot_losses")
 
 
 
@@ -209,7 +212,7 @@ def parallel_training(params=None, model_ids=None, nb_jobs=1, first_id=None,
 
     if FLAGS.DEBUG:
         results = Parallel(n_jobs=nb_jobs)(delayed(train_switcher)(
-            anomaly_detection=FLAGS.ANOMALY_DETECTION,
+            anomaly_detection=FLAGS.ANOMALY_DETECTION, DEBUG=FLAGS.DEBUG,
             n_dataset_workers=FLAGS.N_DATASET_WORKERS, use_gpu=FLAGS.USE_GPU,
             gpu_num=FLAGS.GPU_NUM, nb_cpus=FLAGS.NB_CPUS, send=FLAGS.SEND,
             **param)
@@ -285,6 +288,9 @@ def main(arg):
     plot_loss_comparison = None
     if FLAGS.plot_loss_comparison:
         plot_loss_comparison = eval("config."+FLAGS.plot_loss_comparison)
+    plot_losses = None
+    if FLAGS.plot_losses:
+        plot_losses = eval("config."+FLAGS.plot_losses)
     print('nb_jobs: {}'.format(nb_jobs))
     if params_list is not None or model_ids is not None:
         parallel_training(
@@ -305,6 +311,8 @@ def main(arg):
         extras.plot_convergence_study(send=FLAGS.SEND, **plot_conv_study)
     if plot_loss_comparison is not None:
         extras.plot_loss_comparison(send=FLAGS.SEND, **plot_loss_comparison)
+    if plot_losses is not None:
+        extras.plot_losses(send=FLAGS.SEND, **plot_losses)
 
 if __name__ == '__main__':
     app.run(main)

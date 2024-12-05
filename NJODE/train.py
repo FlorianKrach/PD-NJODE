@@ -62,8 +62,8 @@ saved_models_path = config.saved_models_path
 flagfile = config.flagfile
 
 METR_COLUMNS: List[str] = [
-    'epoch', 'train_time', 'eval_time', 'train_loss', 'eval_loss',
-    'optimal_eval_loss']
+    'epoch', 'train_time', 'val_time', 'train_loss', 'val_loss',
+    'optimal_val_loss', 'test_loss', 'optimal_test_loss', 'evaluation_mean_diff']
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
 default_enc_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -75,6 +75,17 @@ USE_GPU = False
 # =====================================================================================================================
 # Functions
 makedirs = config.makedirs
+
+def update_metric_df_to_new_version(df, path):
+    """
+    update the metric file to the new version, using the updated column names
+    """
+    if 'val_loss' not in df.columns:
+        df = df.rename(columns={
+            'eval_time': 'val_time', 'eval_loss': 'val_loss',
+            'optimal_eval_loss': 'optimal_val_loss'})
+        df.to_csv(path)
+    return df
 
 
 def train(
@@ -89,6 +100,7 @@ def train(
         dataset='BlackScholes', dataset_id=None, data_dict=None,
         plot=True, paths_to_plot=(0,),
         saved_models_path=saved_models_path,
+        DEBUG=0,
         **options
 ):
 
@@ -142,6 +154,7 @@ def train(
     :param paths_to_plot: list of ints, which paths of the test-set should be
             plotted
     :param saved_models_path: str, where to save the models
+    :param DEBUG: int, if >0, then the model is in debug mode
     :param options: kwargs, used keywords:
             'test_data_dict'    None, str or dict, if no None, this data_dict is
                             used to define the dataset for plot_only and
@@ -160,10 +173,14 @@ def train(
                             initiating or loading (i.e. no training) and exit
                             afterwards (used by demo)
             'ylabels'       list of str, see plot_one_path_with_pred()
+            'legendlabels'  list of str, see plot_one_path_with_pred()
             'plot_same_yaxis'   bool, whether to plot the same range on y axis
                             for all dimensions
             'plot_obs_prob' bool, whether to plot the observation probability
-            'which_loss'    'standard' or 'easy', used by models.NJODE
+            'which_loss'    default: 'standard', see models.LOSS_FUN_DICT for
+                            choices. suggested: 'easy' or 'very_easy'
+            'loss_quantiles'    None or np.array, if loss is 'quantile', then
+                            this is the array of quantiles to use
             'residual_enc_dec'  bool, whether resNNs are used for encoder and
                             readout NN, used by models.NJODE. the provided value
                             is overwritten by 'residual_enc' & 'residual_dec' if
@@ -195,7 +212,7 @@ def train(
                             of samples used for the training set (randomly
                             selected out of original training set)
             'evaluate'      bool, whether to evaluate the model in the test set
-                            (i.e. not only compute the eval_loss, but also
+                            (i.e. not only compute the val_loss, but also
                             compute the mean difference between the true and the
                             predicted paths comparing at each time point)
             'load_best'     bool, whether to load the best checkpoint instead of
@@ -232,8 +249,23 @@ def train(
             'eval_use_true_paths'   bool, whether to use the true paths for
                             evaluation (instead of the conditional expectation)
                             default: False
-            'which_eval_loss'   str, see models.LOSS_FUN_DICT for choices, which
-                            loss to use for evaluation, default: 'standard'
+            'which_val_loss'   str, see models.LOSS_FUN_DICT for choices, which
+                            loss to use for evaluation, default: 'easy'
+            'input_coords'  list of int or None, which coordinates to use as
+                            input. overwrites the setting from dataset_metadata.
+                            if None, then all coordinates are used.
+            'output_coords' list of int or None, which coordinates to use as
+                            output. overwrites the setting from
+                            dataset_metadata. if None, then all coordinates are
+                            used.
+            'signature_coords'  list of int or None, which coordinates to use as
+                            signature coordinates. overwrites the setting from
+                            dataset_metadata. if None, then all input
+                            coordinates are used.
+            'plot_only_evaluate' bool, whether to evaluate the model when in
+                            plot_only mode
+            'plot_error_dist'   None or dict, if not None, then the kwargs for
+                            the plot_error_distribution function
 
                 -> 'GRU_ODE_Bayes' has the following extra options with the
                     names 'GRU_ODE_Bayes'+<option_name>, for the following list
@@ -326,11 +358,49 @@ def train(
                                                  time_id=dataset_id))
     dataset_metadata = data_utils.load_metadata(stock_model_name=dataset,
                                                 time_id=dataset_id)
-    input_size = dataset_metadata['dimension']
+
+    # get input and output coordinates of the dataset
+    input_coords = None
+    output_coords = None
+    signature_coords = None
+    if "input_coords" in options:
+        input_coords = options["input_coords"]
+    elif "input_coords" in dataset_metadata:
+        input_coords = dataset_metadata["input_coords"]
+    if "output_coords" in options:
+        output_coords = options["output_coords"]
+    elif "output_coords" in dataset_metadata:
+        output_coords = dataset_metadata["output_coords"]
+    if "signature_coords" in options:
+        signature_coords = options["signature_coords"]
+    elif "signature_coords" in dataset_metadata:
+        signature_coords = dataset_metadata["signature_coords"]
+    if input_coords is None:
+        input_size = dataset_metadata['dimension']
+        input_coords = np.arange(input_size)
+    else:
+        input_size = len(input_coords)
+    if output_coords is None:
+        output_size = dataset_metadata['dimension']
+        output_coords = np.arange(output_size)
+    else:
+        output_size = len(output_coords)
+    if signature_coords is None:
+        signature_coords = input_coords
+    loss_quantiles = None
+    if 'loss_quantiles' in options:
+        loss_quantiles = options['loss_quantiles']
+
+    initial_print += '\ninput_coords: {}\noutput_coords: {}'.format(
+        input_coords, output_coords)
+    initial_print += '\ninput_size: {}\noutput_size: {}'.format(
+        input_size, output_size)
+    initial_print += '\nsignature_coords: {}'.format(signature_coords)
     dimension = dataset_metadata['dimension']
-    output_size = input_size
     T = dataset_metadata['maturity']
     delta_t = dataset_metadata['dt']  # copy metadata
+    original_output_dim = output_size
+    original_input_dim = input_size
 
     # load raw data
     train_idx, val_idx = train_test_split(
@@ -359,10 +429,17 @@ def train(
 
     # get data-loader for training
     if 'func_appl_X' in options:  # list of functions to apply to the paths in X
+        initial_print += '\napply functions to X'
         functions = options['func_appl_X']
         collate_fn, mult = data_utils.CustomCollateFnGen(functions)
         input_size = input_size * mult
         output_size = output_size * mult
+        input_coords = np.concatenate(
+            [np.array(input_coords)+dimension*i for i in range(mult)])
+        output_coords = np.concatenate(
+            [np.array(output_coords)+dimension*i for i in range(mult)])
+        initial_print += '\nnew input_coords: {}'.format(input_coords)
+        initial_print += '\nnew output_coords: {}'.format(output_coords)
     else:
         functions = None
         collate_fn, mult = data_utils.CustomCollateFnGen(None)
@@ -389,6 +466,9 @@ def train(
         dl_test = dl_val
         stockmodel_test = stockmodel
         testset_metadata = dataset_metadata
+    if loss_quantiles is not None:
+        stockmodel.set_quantiles(loss_quantiles)
+        stockmodel_test.set_quantiles(loss_quantiles)
 
     # get additional plotting information
     plot_variance = False
@@ -401,6 +481,9 @@ def train(
     ylabels = None
     if 'ylabels' in options:
         ylabels = options['ylabels']
+    legendlabels = None
+    if 'legendlabels' in options:
+        legendlabels = options['legendlabels']
     plot_same_yaxis = False
     if 'plot_same_yaxis' in options:
         plot_same_yaxis = options['plot_same_yaxis']
@@ -408,19 +491,49 @@ def train(
     if 'plot_obs_prob' in options:
         plot_obs_prob = options["plot_obs_prob"]
 
+    # validation loss function
+    which_val_loss = 'very_easy'
+    if 'which_loss' in options:
+        which_val_loss = options['which_loss']
+    if 'which_val_loss' in options:
+        which_val_loss = options['which_val_loss']
+    assert which_val_loss in models.LOSS_FUN_DICT
+
     # get optimal eval loss
     #   -> if other functions are applied to X, then only the original X is used
-    #      in the computation of the optimal eval loss
+    #      in the computation of the optimal eval loss, except for the case of
+    #      functions=["power-2"] and the model has implemented the loss
+    #      computation for the power-2 case
     print(dataset_metadata)
-    if use_cond_exp:
-        opt_eval_loss = compute_optimal_eval_loss(
-            dl_val, stockmodel, delta_t, T, mult=mult)
-        initial_print += '\noptimal eval loss (achieved by true cond exp): ' \
-                     '{:.5f}'.format(opt_eval_loss)
+    plot_only = False
+    if 'plot_only' in options:
+        plot_only = options['plot_only']
+    if use_cond_exp and not plot_only:
+        store_cond_exp = True
+        if dl_val != dl_test:
+            store_cond_exp = False
+        if (functions is not None and functions == ["power-2"] and
+                stockmodel.loss_comp_for_pow2_implemented):
+            corrected_string = "(for X and X^2) "
+            opt_val_loss = compute_optimal_val_loss(
+                dl_val, stockmodel, delta_t, T, mult=1,
+                store_cond_exp=store_cond_exp, return_var=True,
+                which_loss=which_val_loss)
+        else:
+            if functions is not None and len(functions) > 0:
+                initial_print += '\nWARNING: optimal loss computation for ' \
+                                 'power=2 not implemented for this model'
+                corrected_string = "(corrected: only original X used) "
+            else:
+                corrected_string = ""
+            opt_val_loss = compute_optimal_val_loss(
+                dl_val, stockmodel, delta_t, T, mult=mult,
+                store_cond_exp=store_cond_exp, return_var=False,
+                which_loss=which_val_loss)
+        initial_print += '\noptimal {}val-loss (achieved by true cond exp): ' \
+                     '{:.5f}'.format(corrected_string, opt_val_loss)
     else:
-        opt_eval_loss = np.nan
-    if 'other_model' in options:
-        opt_eval_loss = np.nan
+        opt_val_loss = np.nan
 
     # get params_dict
     params_dict = {  # create a dictionary of the wanted parameters
@@ -433,8 +546,13 @@ def train(
         'data_dict': data_dict,
         'learning_rate': learning_rate, 'test_size': test_size, 'seed': seed,
         'weight': weight, 'weight_decay': weight_decay,
-        'optimal_eval_loss': opt_eval_loss, 'options': options}
+        'optimal_val_loss': opt_val_loss, 'options': options}
     desc = json.dumps(params_dict, sort_keys=True)
+
+    # add additional values to params_dict (not to be shown in the description)
+    params_dict['input_coords'] = input_coords
+    params_dict['output_coords'] = output_coords
+    params_dict['signature_coords'] = signature_coords
 
     # get overview file
     resume_training = False
@@ -553,18 +671,9 @@ def train(
     if 'gradient_clip' in options:
         gradient_clip = options["gradient_clip"]
 
-    # evaluation loss function
-    which_eval_loss = 'standard'
-    if 'which_eval_loss' in options:
-        which_eval_loss = options['which_eval_loss']
-    assert which_eval_loss in models.LOSS_FUN_DICT
-
     # load saved model if wanted/possible
-    best_eval_loss = np.infty
-    if 'evaluate' in options and options['evaluate']:
-        metr_columns = METR_COLUMNS + ['evaluation_mean_diff']
-    else:
-        metr_columns = METR_COLUMNS
+    best_val_loss = np.infty
+    metr_columns = METR_COLUMNS
     if resume_training:
         initial_print += '\nload saved model ...'
         try:
@@ -575,7 +684,9 @@ def train(
                 models.get_ckpt_model(model_path_save_last, model, optimizer,
                                       device)
             df_metric = pd.read_csv(model_metric_file, index_col=0)
-            best_eval_loss = np.min(df_metric['eval_loss'].values)
+            df_metric = update_metric_df_to_new_version(
+                df_metric, model_metric_file)
+            best_val_loss = np.min(df_metric['val_loss'].values)
             model.epoch += 1
             model.weight_decay_step()
             initial_print += '\nepoch: {}, weight: {}'.format(
@@ -589,40 +700,67 @@ def train(
         df_metric = pd.DataFrame(columns=metr_columns)
 
     # ---------- plot only option ------------
-    if 'plot_only' in options and options['plot_only']:
-        for i, b in enumerate(dl_test):
-            batch = b
+    if plot_only:
+        print("!! plot only mode !!")
+        batch = next(iter(dl_test))
         model.epoch -= 1
         initial_print += '\nplotting ...'
         plot_filename = 'demo-plot_epoch-{}'.format(model.epoch)
         plot_filename = plot_filename + '_path-{}.pdf'
-        reuse_cond_exp = True
-        if dl_test != dl_val:
-            reuse_cond_exp = False
-        curr_opt_loss = plot_one_path_with_pred(
+        plot_error_dist = None
+        if "plot_error_dist" in options:
+            plot_error_dist = options["plot_error_dist"]
+        ref_model_to_use = None
+        if "ref_model_to_use" in options:
+            ref_model_to_use = options["ref_model_to_use"]
+        curr_opt_loss, c_model_test_loss, ed_paths = plot_one_path_with_pred(
             device, model, batch, stockmodel_test,
             testset_metadata['dt'], testset_metadata['maturity'],
             path_to_plot=paths_to_plot, save_path=plot_save_path,
             filename=plot_filename, plot_variance=plot_variance,
             functions=functions, std_factor=std_factor,
+            use_cond_exp=use_cond_exp, output_coords=output_coords,
             model_name=model_name, save_extras=save_extras, ylabels=ylabels,
+            legendlabels=legendlabels, input_coords=input_coords,
             same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
-            dataset_metadata=testset_metadata, reuse_cond_exp=reuse_cond_exp,)
+            dataset_metadata=testset_metadata, reuse_cond_exp=True,
+            loss_quantiles=loss_quantiles, which_loss=which_val_loss,
+            plot_error_dist=plot_error_dist, ref_model_to_use=ref_model_to_use)
+        eval_msd = None
+        if "plot_only_evaluate" in options and options["plot_only_evaluate"]:
+            print("evaluate model ...")
+            eval_msd = evaluate_model(
+                model=model, dl_test=dl_test, device=device,
+                stockmodel_test=stockmodel_test,
+                testset_metadata=testset_metadata,
+                mult=mult, use_cond_exp=use_cond_exp,
+                eval_use_true_paths=eval_use_true_paths)
         if SEND:
             files_to_send = []
             caption = "{} - id={}".format(model_name, model_id)
             for i in paths_to_plot:
                 files_to_send.append(
                     os.path.join(plot_save_path, plot_filename.format(i)))
+            if ed_paths is not None:
+                files_to_send += ed_paths
             SBM.send_notification(
-                text='finished plot-only: {}, id={}\n\n{}'.format(
-                    model_name, model_id, desc),
+                text='finished plot-only: {}, id={}\n'
+                     'optimal test loss: {}\n'
+                     'current test loss: {}\n'
+                     'evaluation metric (test set): {}, epoch: {}\n\n{}'.format(
+                    model_name, model_id, curr_opt_loss,
+                    c_model_test_loss, eval_msd, model.epoch, desc),
                 chat_id=config.CHAT_ID,
                 files=files_to_send,
                 text_for_files=caption
             )
-        initial_print += '\noptimal eval-loss (with current weight={:.5f}): ' \
+        initial_print += '\noptimal test-loss (with current weight={:.5f}): ' \
                          '{:.5f}'.format(model.weight, curr_opt_loss)
+        initial_print += '\nmodel test-loss (with current weight={:.5f}): ' \
+                         '{:.5f}'.format(model.weight, c_model_test_loss)
+        if eval_msd is not None:
+            initial_print += '\nevaluation metric (test set): {:.3e}'.format(
+                eval_msd)
         print(initial_print)
         return 0
 
@@ -687,8 +825,7 @@ def train(
                 hT, loss = model(
                     times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
                     delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
-                    return_path=False, get_loss=True, M=M, start_M=start_M,
-                    epoch=model.epoch)
+                    return_path=False, get_loss=True, M=M, start_M=start_M,)
             elif options['other_model'] == "randomizedNJODE":
                 linreg_X_, linreg_y_ = model.get_Xy_reg(
                     times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
@@ -713,6 +850,9 @@ def train(
             optimizer.step()  # update weights by ADAM optimizer
             if ANOMALY_DETECTION:
                 print(r"current loss: {}".format(loss.detach().numpy()))
+            if DEBUG:
+                print("DEBUG MODE: stop training after first batch")
+                break
         if 'other_model' in options and \
                 options['other_model'] == "randomizedNJODE":
             linreg_X = np.stack(linreg_X, axis=0)
@@ -732,8 +872,6 @@ def train(
             eval_msd = 0
             model.eval()  # set model in evaluation mode
             for i, b in enumerate(dl_val):  # iterate over dataloader for validation set
-                if plot:
-                    batch = b
                 times = b["times"]
                 time_ptr = b["time_ptr"]
                 X = b["X"].to(device)
@@ -755,7 +893,7 @@ def train(
                     hT, c_loss = model(
                         times, time_ptr, X, obs_idx, delta_t, T, start_X,
                         n_obs_ot, return_path=False, get_loss=True, M=M,
-                        start_M=start_M, which_loss=which_eval_loss,)
+                        start_M=start_M, which_loss=which_val_loss,)
                 elif options['other_model'] == "GRU_ODE_Bayes":
                     if M is None:
                         M = torch.ones_like(X)
@@ -775,76 +913,51 @@ def train(
                         hT_corrected, c_loss_corrected = model(
                             times, time_ptr, X, obs_idx, delta_t, T, start_X,
                             n_obs_ot, return_path=False, get_loss=True, M=M,
-                            start_M=start_M, which_loss=which_eval_loss,
-                            dim_to=dimension)
+                            start_M=start_M, which_loss=which_val_loss,
+                            dim_to=original_output_dim)
                     loss_val_corrected += c_loss_corrected.detach().numpy()
 
             # mean squared difference evaluation
             if 'evaluate' in options and options['evaluate']:
-                for i, b in enumerate(dl_test):
-                    times = b["times"]
-                    time_ptr = b["time_ptr"]
-                    X = b["X"].to(device)
-                    M = b["M"]
-                    if M is not None:
-                        M = M.to(device)
-                    start_M = b["start_M"]
-                    if start_M is not None:
-                        start_M = start_M.to(device)
+                eval_msd = evaluate_model(
+                    model=model, dl_test=dl_test, device=device,
+                    stockmodel_test=stockmodel_test,
+                    testset_metadata=testset_metadata,
+                    mult=mult, use_cond_exp=use_cond_exp,
+                    eval_use_true_paths=eval_use_true_paths)
 
-                    start_X = b["start_X"].to(device)
-                    obs_idx = b["obs_idx"]
-                    n_obs_ot = b["n_obs_ot"].to(device)
-                    true_paths = b["true_paths"]
-                    true_mask = b["true_mask"]
-
-                    if use_cond_exp and not eval_use_true_paths:
-                        true_paths = None
-                        true_mask = None
-                    use_stored_cond_exp = True
-                    if dl_test != dl_val:
-                        use_stored_cond_exp = False
-                    _eval_msd = model.evaluate(
-                        times=times, time_ptr=time_ptr, X=X,
-                        obs_idx=obs_idx,
-                        delta_t=testset_metadata["dt"],
-                        T=testset_metadata["maturity"],
-                        start_X=start_X, n_obs_ot=n_obs_ot,
-                        stockmodel=stockmodel_test, return_paths=False, M=M,
-                        start_M=start_M, true_paths=true_paths,
-                        true_mask=true_mask, mult=mult,
-                        use_stored_cond_exp=use_stored_cond_exp,)
-                    eval_msd += _eval_msd
-
-            eval_time = time.time() - t
+            val_time = time.time() - t
             loss_val = loss_val / num_obs
             loss_val_corrected /= num_obs
             eval_msd = eval_msd / num_obs
             train_loss = loss.detach().numpy()
             print_str = "epoch {}, weight={:.5f}, train-loss={:.5f}, " \
-                        "optimal-eval-loss={:.5f}, eval-loss={:.5f}, ".format(
-                model.epoch, model.weight, train_loss, opt_eval_loss, loss_val)
+                        "optimal-val-loss={:.5f}, val-loss={:.5f}, ".format(
+                model.epoch, model.weight, train_loss, opt_val_loss, loss_val)
             if mult is not None and mult > 1:
-                print_str += "\ncorrected(i.e. without additional dims of " \
-                             "funct_appl_X)-eval-loss={:.5f}, ".format(
+                print_str += "\ncorrected (i.e. without additional dims of " \
+                             "funct_appl_X)-val-loss={:.5f}, ".format(
                     loss_val_corrected)
             print(print_str)
+
+        curr_metric = [model.epoch, train_time, val_time, train_loss,
+                               loss_val, opt_val_loss, None, None]
         if 'evaluate' in options and options['evaluate']:
-            metric_app.append([model.epoch, train_time, eval_time, train_loss,
-                               loss_val, opt_eval_loss, eval_msd])
-            print("evaluation mean square difference={:.5f}".format(
+            curr_metric.append(eval_msd)
+            print("evaluation mean square difference (test set): {:.5f}".format(
                 eval_msd))
         else:
-            metric_app.append([model.epoch, train_time, eval_time, train_loss,
-                               loss_val, opt_eval_loss])
+            curr_metric.append(None)
+        metric_app.append(curr_metric)
 
         # save model
         if model.epoch % save_every == 0:
             if plot:
+                batch = next(iter(dl_test))
                 print('plotting ...')
                 plot_filename = 'epoch-{}'.format(model.epoch)
                 plot_filename = plot_filename + '_path-{}.pdf'
-                curr_opt_loss = plot_one_path_with_pred(
+                curr_opt_test_loss, c_model_test_loss, _ = plot_one_path_with_pred(
                     device=device, model=model, batch=batch,
                     stockmodel=stockmodel, delta_t=delta_t, T=T,
                     path_to_plot=paths_to_plot, save_path=plot_save_path,
@@ -852,10 +965,17 @@ def train(
                     functions=functions, std_factor=std_factor,
                     model_name=model_name, save_extras=save_extras,
                     ylabels=ylabels, use_cond_exp=use_cond_exp,
+                    legendlabels=legendlabels, reuse_cond_exp=True,
+                    output_coords=output_coords, input_coords=input_coords,
                     same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
-                    dataset_metadata=dataset_metadata)
-                print('optimal eval-loss (with current weight={:.5f}): '
-                      '{:.5f}'.format(model.weight, curr_opt_loss))
+                    dataset_metadata=dataset_metadata,
+                    loss_quantiles=loss_quantiles, which_loss=which_val_loss)
+                print('optimal test-loss (with current weight={:.5f}): '
+                      '{:.5f}'.format(model.weight, curr_opt_test_loss))
+                print('model test-loss (with current weight={:.5f}): '
+                      '{:.5f}'.format(model.weight, c_model_test_loss))
+                curr_metric[-2] = curr_opt_test_loss
+                curr_metric[-3] = c_model_test_loss
             print('save model ...')
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
@@ -864,10 +984,10 @@ def train(
                                    model.epoch)
             metric_app = []
             print('saved!')
-        if loss_val < best_eval_loss:
+        if loss_val < best_val_loss:
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
-                best_eval_loss, loss_val, model.epoch))
+                best_val_loss, loss_val, model.epoch))
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
             df_metric.to_csv(model_metric_file)
@@ -876,7 +996,7 @@ def train(
             models.save_checkpoint(model, optimizer, model_path_save_best,
                                    model.epoch)
             metric_app = []
-            best_eval_loss = loss_val
+            best_val_loss = loss_val
             print('saved!')
         print("-"*100)
 
@@ -899,13 +1019,15 @@ def train(
             text_for_files=caption)
 
     # delete model & free memory
-    del model, dl, dl_val, data_train, data_val
+    del model, dl, dl_val, data_train, data_val, dl_test
     gc.collect()
 
     return 0
 
 
-def compute_optimal_eval_loss(dl_val, stockmodel, delta_t, T, mult=None):
+def compute_optimal_val_loss(
+        dl_val, stockmodel, delta_t, T, mult=None,
+        store_cond_exp=False, return_var=False, which_loss='easy'):
     """
     compute optimal evaluation loss (with the true cond. exp.) on the
     test-dataset
@@ -913,6 +1035,8 @@ def compute_optimal_eval_loss(dl_val, stockmodel, delta_t, T, mult=None):
     :param stockmodel: stock_model.StockModel instance
     :param delta_t: float, the time_delta
     :param T: float, the terminal time
+    :param mult: None or int, the factor by which the dimension is multiplied
+    :param store_cond_exp: bool, whether to store the conditional expectation
     :return: float (optimal loss)
     """
     opt_loss = 0
@@ -930,8 +1054,183 @@ def compute_optimal_eval_loss(dl_val, stockmodel, delta_t, T, mult=None):
         num_obs += 1
         opt_loss += stockmodel.get_optimal_loss(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, n_obs_ot, M=M,
-            mult=mult)
+            mult=mult, store_and_use_stored=store_cond_exp,
+            return_var=return_var, which_loss=which_loss)
     return opt_loss / num_obs
+
+
+def evaluate_model(
+        model, dl_test, device, stockmodel_test, testset_metadata,
+        mult, use_cond_exp, eval_use_true_paths):
+    """
+    evaluate the model on the test set
+
+    Args:
+        model:
+        dl_test:
+        device:
+        stockmodel_test:
+        testset_metadata:
+        mult:
+        use_cond_exp:
+        eval_use_true_paths:
+
+    Returns: evaluation metric
+
+    """
+    eval_msd = 0.
+    for i, b in enumerate(dl_test):
+        times = b["times"]
+        time_ptr = b["time_ptr"]
+        X = b["X"].to(device)
+        M = b["M"]
+        if M is not None:
+            M = M.to(device)
+        start_M = b["start_M"]
+        if start_M is not None:
+            start_M = start_M.to(device)
+        start_X = b["start_X"].to(device)
+        obs_idx = b["obs_idx"]
+        n_obs_ot = b["n_obs_ot"].to(device)
+        true_paths = b["true_paths"]
+        true_mask = b["true_mask"]
+
+        if use_cond_exp and not eval_use_true_paths:
+            true_paths = None
+            true_mask = None
+        _eval_msd = model.evaluate(
+            times=times, time_ptr=time_ptr, X=X,
+            obs_idx=obs_idx,
+            delta_t=testset_metadata["dt"],
+            T=testset_metadata["maturity"],
+            start_X=start_X, n_obs_ot=n_obs_ot,
+            stockmodel=stockmodel_test, return_paths=False, M=M,
+            start_M=start_M, true_paths=true_paths,
+            true_mask=true_mask, mult=mult,
+            use_stored_cond_exp=True, )
+        eval_msd += _eval_msd
+
+    return eval_msd
+
+def compute_prediction_errors(
+        model_pred, model_t, true_paths, true_times, output_coords,
+        original_out_dim, eval_times):
+    """
+    compute the error distribution of the model predictions
+    Args:
+        model_pred: np.array, the model predictions,
+            shape: (time_steps, bs, dim)
+        model_t: np.array, the time points of the model predictions,
+            shape: (time_steps,)
+        true_paths: np.array, the true paths, shape: (bs, dim, time_steps)
+        true_times: np.array, the time points of the true paths,
+            shape: (time_steps,)
+        output_coords: list of int, the coordinates corresponding to the model
+            output in the extended X (after function applications)
+        original_out_dim: int, the original dimension of the output (i.e.,
+            without function applications)
+        eval_times: list of float, the times where to evaluate the error
+
+    Returns:
+
+    """
+
+    if len(output_coords) > original_out_dim:
+        output_coords = output_coords[:original_out_dim]
+    eval_times = sorted(eval_times)
+
+    # get the model predictions at the evaluation times
+    ind = np.searchsorted(model_t, eval_times, side='right') - 1
+    model_pred_eval = model_pred[:, :, :original_out_dim][ind]
+
+    # get the true paths at the evaluation times
+    ind = np.searchsorted(true_times, eval_times, side='right') - 1
+    true_paths = np.transpose(true_paths, (2, 0, 1))
+    true_paths_eval = true_paths[:, :, output_coords][ind]
+
+    # compute the errors
+    error = model_pred_eval - true_paths_eval
+    return error
+
+
+def plot_error_distribution(
+        true_paths, true_times, model_preds, model_ts, output_coords,
+        original_out_dim, eval_times, colors, model_names=None, save_path='',
+        filename='error_dist_plot_{}.pdf', coord_names=None):
+
+    # replace special times ("mid", "end") by the actual times
+    T = true_times[-1]
+    _evl_times = []
+    for t in eval_times:
+        if t == "mid":
+            _evl_times.append(T/2)
+        elif t in ["end", "last"]:
+            _evl_times.append(T)
+        else:
+            _evl_times.append(t)
+    eval_times = _evl_times
+
+    # compute the errors for each model, shape: (model, eval_times, bs, dim)
+    errors = [compute_prediction_errors(
+        model_pred, model_t, true_paths, true_times, output_coords,
+        original_out_dim, eval_times) for model_pred, model_t in
+              zip(model_preds, model_ts)]
+
+    # get error statistics
+    nperrors = np.array(errors)
+    mean_errors = np.mean(nperrors, axis=2)
+    std_errors = np.std(nperrors, axis=2)
+    cols = ["model", "eval_time", "coord", "mean", "std"]
+    dat = []
+    for i, model_name in enumerate(model_names):
+        for j, eval_time in enumerate(eval_times):
+            for k, coord in enumerate(output_coords):
+                dat.append([model_name, eval_time, coord, mean_errors[i, j, k],
+                            std_errors[i, j, k]])
+    df = pd.DataFrame(columns=cols, data=dat)
+    err_stats_file = save_path + "error_stats.csv"
+    df.to_csv(err_stats_file)
+    paths = [err_stats_file]
+
+    # plot the error distribution
+    def set_box_color(bp, color):
+        plt.setp(bp['boxes'], color=color)
+        plt.setp(bp['whiskers'], color=color)
+        plt.setp(bp['caps'], color=color)
+        plt.setp(bp['medians'], color=color)
+
+    for d in range(original_out_dim):
+        plt.figure()
+        boxplots = []
+        nb_groups = len(errors)
+        # loop over the models
+        for i, error in enumerate(errors):
+            boxplots.append(plt.boxplot(
+                # make boxplot for each evaluation time
+                [x[:,d] for x in error],
+                positions=np.array(np.arange(len(eval_times)))*nb_groups+i*0.8,
+                sym='', widths=0.6))
+
+        for i, bp in enumerate(boxplots):
+            set_box_color(bp, colors[i])
+            plt.plot([], c=colors[i], label=model_names[i])
+        plt.legend()
+
+        plt.xticks(np.arange(len(eval_times))*nb_groups+(nb_groups-1)*0.4,
+                   eval_times)
+        # plt.xlim(-1, len(eval_times) * nb_groups + 1)
+        cn = d
+        if coord_names is not None:
+            cn = coord_names[output_coords[d]]
+        plt.xlabel('Evaluation Time')
+        plt.ylabel('Prediction Error')
+        plt.title('Error distribution for coordinate {}'.format(cn))
+        plt.tight_layout()
+        plt.savefig(filename.format(d))
+        plt.close()
+        paths.append(filename.format(d))
+
+    return paths
 
 
 def plot_one_path_with_pred(
@@ -939,10 +1238,14 @@ def plot_one_path_with_pred(
         path_to_plot=(0,), save_path='', filename='plot_{}.pdf',
         plot_variance=False, functions=None, std_factor=1,
         model_name=None, ylabels=None,
+        legendlabels=None,
         save_extras={'bbox_inches': 'tight', 'pad_inches': 0.01},
         use_cond_exp=True, same_yaxis=False,
         plot_obs_prob=False, dataset_metadata=None,
-        reuse_cond_exp=True,
+        reuse_cond_exp=True, output_coords=None,
+        loss_quantiles=None, input_coords=None,
+        which_loss='easy',
+        plot_error_dist=None, ref_model_to_use=None,
 ):
     """
     plot one path of the stockmodel together with optimal cond. exp. and its
@@ -965,6 +1268,10 @@ def plot_one_path_with_pred(
     :param std_factor: float, the factor by which std is multiplied
     :param model_name: str or None, name used for model in plots
     :param ylabels: None or list of str of same length as dimension of X
+    :param legendlabels: None or list of str of length 4 or 5 (labels of
+        i) true path, ii) our model, iii) true cond. exp., iv) observed values,
+        v) true values at observation times (only if noisy observations are
+        used))
     :param save_extras: dict with extra options for saving plot
     :param use_cond_exp: bool, whether to plot the conditional expectation
     :param same_yaxis: bool, whether to plot all coordinates with same range on
@@ -975,6 +1282,19 @@ def plot_one_path_with_pred(
         used dataset to extract the observation probability
     :param reuse_cond_exp: bool, whether to reuse the conditional expectation
         from the last computation
+    :param output_coords: None or list of ints, the coordinates corresponding to
+        the model output
+    :param loss_quantiles: None or list of floats, the quantiles to plot for the
+        loss
+    :param input_coords: None or list of ints, the coordinates corresponding to
+        the model input
+    :param which_loss: str, the loss function to use for the computation
+    :param plot_error_dists: None or dict, the kwargs for plotting the error
+        distribution
+    :param ref_model_to_use: None or str, the reference models to use in the
+        plots, None uses the standard reference model, usually the conditional
+        expectation
+
     :return: optimal loss
     """
     if model_name is None or model_name == "NJODE":
@@ -983,6 +1303,7 @@ def plot_one_path_with_pred(
     prop_cycle = plt.rcParams['axes.prop_cycle']  # change style of plot?
     colors = prop_cycle.by_key()['color']
     std_color = list(matplotlib.colors.to_rgb(colors[1])) + [0.5]
+    std_color2 = list(matplotlib.colors.to_rgb(colors[2])) + [0.5]
 
     makedirs(save_path)  # create a directory
 
@@ -999,7 +1320,16 @@ def plot_one_path_with_pred(
     obs_idx = batch["obs_idx"]
     n_obs_ot = batch["n_obs_ot"].to(device)
     true_X = batch["true_paths"]
+    # dim does not take the function applications into account
     bs, dim, time_steps = true_X.shape
+    if output_coords is None:
+        output_coords = list(range(dim))
+        out_dim = dim
+    else:
+        # if output_coords is given, then they also include the function
+        #   applications
+        mult = len(functions)+1 if functions is not None else 1
+        out_dim = int(len(output_coords)/mult)
     true_M = batch["true_mask"]
     observed_dates = batch['observed_dates']
     if "obs_noise" in batch:
@@ -1011,40 +1341,102 @@ def plot_one_path_with_pred(
     model.eval()  # put model in evaluation mode
     res = model.get_pred(
         times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx, delta_t=delta_t,
-        T=T, start_X=start_X, M=M, start_M=start_M)
+        T=T, start_X=start_X, M=M, start_M=start_M, n_obs_ot=n_obs_ot,
+        which_loss=which_loss)
     path_y_pred = res['pred'].detach().numpy()
     path_t_pred = res['pred_t']
+    current_model_loss = res['loss'].detach().numpy()
 
     # get variance path
     if plot_variance and (functions is not None) and ('power-2' in functions):
         which = np.argmax(np.array(functions) == 'power-2')+1
-        y2 = path_y_pred[:, :, (dim * which):(dim * (which + 1))]
-        path_var_pred = y2 - np.power(path_y_pred[:, :, 0:dim], 2)
+        y2 = path_y_pred[:, :, (out_dim * which):(out_dim * (which + 1))]
+        path_var_pred = y2 - np.power(path_y_pred[:, :, 0:out_dim], 2)
         if np.any(path_var_pred < 0):
             print('WARNING: some predicted cond. variances below 0 -> clip')
             path_var_pred = np.maximum(0, path_var_pred)
         path_std_pred = np.sqrt(path_var_pred)
     else:
         plot_variance = False
+    path_var_true = None
     if use_cond_exp:
         if M is not None:
             M = M.detach().numpy()
-        opt_loss, path_t_true, path_y_true = stockmodel.compute_cond_exp(
-            times, time_ptr, X.detach().numpy(), obs_idx.detach().numpy(),
-            delta_t, T, start_X.detach().numpy(), n_obs_ot.detach().numpy(),
+        if (functions is not None and functions == ["power-2"] and
+                stockmodel.loss_comp_for_pow2_implemented):
+            X_ = X.detach().numpy()
+            start_X_ = start_X.detach().numpy()
+        else:
+            X_ = X.detach().numpy()[:, :dim]
+            start_X_ = start_X.detach().numpy()[:, :dim]
+            if M is not None:
+                M = M[:, :dim]
+        res_sm = stockmodel.compute_cond_exp(
+            times, time_ptr, X_, obs_idx.detach().numpy(),
+            delta_t, T, start_X_, n_obs_ot.detach().numpy(),
             return_path=True, get_loss=True, weight=model.weight,
-            M=M, store_and_use_stored=reuse_cond_exp)
+            M=M, store_and_use_stored=reuse_cond_exp, return_var=plot_variance,
+            which_loss=which_loss, ref_model=ref_model_to_use)
+        opt_loss, path_t_true, path_y_true = res_sm[:3]
+        if plot_variance and len(res_sm) > 3:
+            path_var_true = res_sm[3]
+
+        # get additional reference model predictions for error distribution
+        #   plots
+        if (plot_error_dist is not None
+                and "additional_ref_models" in plot_error_dist):
+            add_model_preds = []
+            add_model_ts = []
+            for ref_model in plot_error_dist["additional_ref_models"]:
+                res_sm_add = stockmodel.compute_cond_exp(
+                    times, time_ptr, X_, obs_idx.detach().numpy(),
+                    delta_t, T, start_X_, n_obs_ot.detach().numpy(),
+                    return_path=True, get_loss=True, weight=model.weight,
+                    M=M, store_and_use_stored=False,
+                    return_var=plot_variance,
+                    which_loss=which_loss, ref_model=ref_model)
+                _, t, pred = res_sm_add[:3]
+                add_model_preds.append(pred)
+                add_model_ts.append(t)
     else:
         opt_loss = 0
 
-    # # recreate data
-    # recr_t, recr_X = model.recreate_data(times, time_ptr, X, obs_idx, start_X)
+    # plot the error distribution
+    err_dist_paths = None
+    if plot_error_dist is not None:
+        names = ["model", "cond. exp."]
+        if "additional_ref_models" in plot_error_dist:
+            names += plot_error_dist["additional_ref_models"]
+        if "model_names" not in plot_error_dist:
+            plot_error_dist["model_names"] = names
+        err_dist_filename = "{}error_distribution_plot_coord{}.pdf".format(
+            save_path, "{}")
+        model_preds = [path_y_pred,]
+        model_ts = [path_t_pred,]
+        if use_cond_exp:
+            model_preds.append(path_y_true)
+            model_ts.append(path_t_true)
+        if "additional_ref_models" in plot_error_dist:
+            model_preds += add_model_preds
+            model_ts += add_model_ts
+        err_dist_paths = plot_error_distribution(
+            true_paths=true_X, true_times=path_t_true_X,
+            model_preds=model_preds, model_ts=model_ts,
+            output_coords=output_coords,
+            original_out_dim=out_dim, eval_times=plot_error_dist["eval_times"],
+            colors=colors, model_names=plot_error_dist["model_names"],
+            save_path=save_path, filename=err_dist_filename,
+            coord_names=ylabels)
 
     for i in path_to_plot:
         fig, axs = plt.subplots(dim, sharex=True)
         if dim == 1:
             axs = [axs]
+        outcoord_ind = -1
+        unobserved_coord = False
         for j in range(dim):
+            if j in output_coords:
+                outcoord_ind += 1
             # get the true_X at observed dates
             path_t_obs = []
             path_X_obs = []
@@ -1064,31 +1456,72 @@ def plot_one_path_with_pred(
             if obs_noise is not None:
                 path_O_obs = np.array(path_O_obs)
 
-            axs[j].plot(path_t_true_X, true_X[i, j, :], label='true path',
+            # get the legend labels
+            lab0 = legendlabels[0] if legendlabels is not None else 'true path'
+            lab1 = legendlabels[1] if legendlabels is not None else model_name
+            lab2 = legendlabels[2] if legendlabels is not None \
+                else 'true conditional expectation'
+            lab3 = legendlabels[3] if legendlabels is not None else 'observed'
+
+            axs[j].plot(path_t_true_X, true_X[i, j, :], label=lab0,
                         color=colors[0])
             if obs_noise is not None:
-                axs[j].scatter(path_t_obs, path_O_obs, label='observed',
+                axs[j].scatter(path_t_obs, path_O_obs, label=lab3,
                                color=colors[0])
                 # axs[j].scatter(recr_t, recr_X[i, :, j],label='observed recr.',
                 #                color="black", marker="x")
+                lab4 = legendlabels[4] if legendlabels is not None \
+                    else 'true value at obs time'
                 axs[j].scatter(path_t_obs, path_X_obs,
-                               label='true value at obs time',
+                               label=lab4,
                                color=colors[2], marker='*')
             else:
-                axs[j].scatter(path_t_obs, path_X_obs, label='observed',
-                               color=colors[0])
-            axs[j].plot(path_t_pred, path_y_pred[:, i, j],
-                        label=model_name, color=colors[1])
-            if plot_variance:
-                axs[j].fill_between(
-                    path_t_pred,
-                    path_y_pred[:, i, j] - std_factor * path_std_pred[:, i, j],
-                    path_y_pred[:, i, j] + std_factor * path_std_pred[:, i, j],
-                    color=std_color)
-            if use_cond_exp:
-                axs[j].plot(path_t_true, path_y_true[:, i, j],
-                            label='true conditional expectation',
-                            linestyle=':', color=colors[2])
+                facecolors = colors[0]
+                if input_coords is not None and j not in input_coords:
+                    facecolors = 'none'
+                    lab3 = '(un)observed'
+                    unobserved_coord = True
+                axs[j].scatter(path_t_obs, path_X_obs, label=lab3,
+                               color=colors[0], facecolors=facecolors)
+            if j in output_coords:
+                if loss_quantiles is not None:
+                    for iq, q in enumerate(loss_quantiles):
+                        axs[j].plot(
+                            path_t_pred, path_y_pred[:, i, outcoord_ind, iq],
+                            label="q{} - {}".format(q, lab1),
+                            color=list(matplotlib.colors.to_rgb(colors[1]))+
+                                  [2*min(q, 1-q)])
+                else:
+                    axs[j].plot(path_t_pred, path_y_pred[:, i, outcoord_ind],
+                                label=lab1, color=colors[1])
+                if plot_variance:
+                    axs[j].fill_between(
+                        path_t_pred,
+                        path_y_pred[:, i, outcoord_ind] - std_factor *
+                        path_std_pred[:, i, outcoord_ind],
+                        path_y_pred[:, i, outcoord_ind] + std_factor *
+                        path_std_pred[:, i, outcoord_ind],
+                        color=std_color)
+                if use_cond_exp:
+                    if loss_quantiles is not None:
+                        for iq, q in enumerate(loss_quantiles):
+                            axs[j].plot(
+                                path_t_true, path_y_true[:, i, outcoord_ind,iq],
+                                label="q{} - {}".format(q, lab2),
+                                linestyle=':',
+                                color=list(matplotlib.colors.to_rgb(colors[2]))+
+                                      [2*min(q, 1-q)])
+                    else:
+                        axs[j].plot(path_t_true, path_y_true[:,i,outcoord_ind],
+                                    label=lab2, linestyle=':', color=colors[2])
+                    if plot_variance and path_var_true is not None:
+                        axs[j].fill_between(
+                            path_t_true,
+                            path_y_true[:, i, outcoord_ind] - std_factor *
+                            np.sqrt(path_var_true[:, i, outcoord_ind]),
+                            path_y_true[:, i, outcoord_ind] + std_factor *
+                            np.sqrt(path_var_true[:, i, outcoord_ind]),
+                            color=std_color2)
             if plot_obs_prob and dataset_metadata is not None:
                 ax2 = axs[j].twinx()
                 if "X_dependent_observation_prob" in dataset_metadata:
@@ -1135,12 +1568,22 @@ def plot_one_path_with_pred(
                 eps = (high - low)*0.05
                 axs[j].set_ylim([low-eps, high+eps])
 
-        axs[-1].legend()
+        if unobserved_coord:
+            handles, labels = axs[-1].get_legend_handles_labels()
+            l, = axs[-1].plot(
+                [], [], color=colors[0], label='(un)observed',
+                linestyle='none', marker="o", fillstyle="right")
+
+            handles[-1] = l
+            labels[-1] = 'unobserved/observed'
+            axs[-1].legend(handles, labels)
+        else:
+            axs[-1].legend()
         plt.xlabel('$t$')
         save = os.path.join(save_path, filename.format(i))
         plt.savefig(save, **save_extras)
         plt.close()
 
-    return opt_loss
+    return opt_loss, current_model_loss, err_dist_paths
 
 

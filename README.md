@@ -6,6 +6,7 @@ This repository is the official implementation of the papers
 - [Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](https://arxiv.org/abs/2206.14284)
 - [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
 - [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
+- [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271)
 
 which are part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -19,6 +20,7 @@ The experiments from the follow-up papers can be run with:
 - [Instructions for Optimal Estimation of Generic Dynamics by Path-Dependent Neural Jump ODEs](#instructions-for-running-experiments-of-optimal-estimation-of-generic-dynamics-by-path-dependent-neural-jump-odes)
 - [Instructions for Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework)
 - [Instructions for Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](#instructions-for-running-experiments-of-learning-chaotic-systems-and-long-term-predictions-with-neural-jump-odes)
+- [Instructions for Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](#instructions-for-running-experiments-of-nonparametric-filtering-estimation-and-classification-using-neural-jump-odes)
 
 
 ## Requirements
@@ -85,6 +87,19 @@ please cite our papers:
       url={https://arxiv.org/abs/2407.18808},
     }
     ```
+
+- [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271)
+  ```
+  @misc{heiss2024nonparametricfilteringestimationclassification,
+      title={Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs}, 
+      author={Jakob Heiss and Florian Krach and Thorsten Schmidt and Félix B. Tambe-Ndonfack},
+      year={2024},
+      eprint={2412.03271},
+      archivePrefix={arXiv},
+      primaryClass={stat.ML},
+      url={https://arxiv.org/abs/2412.03271}, 
+  }
+  ```
 
 
 - [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR)
@@ -406,6 +421,27 @@ python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id
 
 
 
+
+--------------------------------------------------------------------------------
+# Experimental: learning quantiles with NJODE
+get datasets:
+```shell
+python data_utils.py --dataset_name=BMandQuantiles --dataset_params=BM_Quantiles --seed=0
+python data_utils.py --dataset_name=BMandQuantiles --dataset_params=BM_Quantiles_test --seed=1
+```
+
+train PD-NJODE:
+```shell
+python run.py --params=param_list_BMQ --NB_JOBS=16 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_BMQ
+python run.py --plot_paths=plot_paths_BMQ_dict
+```
+
+
+
+
+
+
+
 --------------------------------------------------------------------------------
 # Instructions for Running Experiments of Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework
 
@@ -492,6 +528,87 @@ train model on BlackScholes dataset for long-term forecasting:
 python run.py --params=param_list_BS_LT --NB_JOBS=4 --NB_CPUS=2 --first_id=1 --get_overview=overview_dict_BS_LT
 python run.py --plot_paths=plot_paths_BS_LT_dict
 ```
+
+train on physionet dataset for long-term forecasting:
+```shell
+python run.py --params=param_list_physioLT --NB_JOBS=8 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_physioLT # --crossval=crossval_dict_physio
+```
+
+
+--------------------------------------------------------------------------------
+# Instructions for Running Experiments of Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs
+
+The code for the experiments of the paper [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271).
+
+The configs for these experiments are in [config_ParamFilter.py](NJODE/configs/config_ParamFilter.py).
+
+
+generate datasets:
+```shell
+python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict1 --seed=0
+python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict1_test --seed=1
+
+python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict2 --seed=0
+python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict2_test --seed=1
+
+for i in 1 2 
+do
+  for j in {1..6}
+  do
+    python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict_CS${i}_${j} --seed=0
+    python data_utils.py --dataset_name=BlackScholesUncertainParams --dataset_params=PF_BSUP_dict_CS${i}_test_${j} --seed=1
+  done
+done
+
+python data_utils.py --dataset_name=BMwithUncertainDrift --dataset_params=PF_BMwUD_dict1 --seed=0
+python data_utils.py --dataset_name=BMwithUncertainDrift --dataset_params=PF_BMwUD_dict1_test --seed=1
+
+python data_utils.py --dataset_name=BMFiltering --dataset_params=IO_BM_Filter_dict_1 --seed=0
+python data_utils.py --dataset_name=BMFiltering --dataset_params=IO_BM_Filter_dict_1_test --seed=1
+
+python data_utils.py --dataset_name=BlackScholes --dataset_params=IO_BS_dict --seed=0
+python data_utils.py --dataset_name=BlackScholes --dataset_params=IO_BS_dict_test --seed=1
+
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict1 --seed=0
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict1_test --seed=1
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict2 --seed=0
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict2_test --seed=1
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict3 --seed=0
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict3_test --seed=1
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict4 --seed=0
+python data_utils.py --dataset_name=CIRUncertainParams --dataset_params=PF_CIR_dict4_test --seed=1
+
+python data_utils.py --dataset_name=BMClassification --dataset_params=IO_BMClass_dict --seed=0
+python data_utils.py --dataset_name=BMClassification --dataset_params=IO_BMClass_dict_test --seed=1
+```
+
+train NJODE:
+```shell
+python run.py --params=param_list_PF_BSUP --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_PF_BSUP
+
+python run.py --params=param_list_PF_BSUP2 --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_PF_BSUP2
+python run.py --plot_paths=plot_paths_PF_BSUP_dict2
+python run.py --plot_paths=plot_paths_PF_BSUP_dict2_1
+
+python run.py --params=param_list_PF_BSUP_CS --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_PF_BSUP_CS
+python run.py --plot_paths=plot_paths_PF_BSUP_CS_dict
+
+python run.py --params=param_list_PF_BMwUD --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_PF_BMwUD
+python run.py --plot_paths=plot_paths_PF_BMwUD_dict
+
+python run.py --params=param_list_IO_BMFilter --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_IO_BMFilter
+python run.py --plot_paths=plot_paths_IO_BMFilter_dict
+
+python run.py --params=param_list_IO_BS_LJ --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_IO_BS_LJ
+python run.py --plot_losses=plot_loss_IO_BS_LJ
+
+python run.py --params=param_list_PF_CIR --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_PF_CIR
+python run.py --plot_paths=plot_paths_PF_CIR_dict
+
+python run.py --params=param_list_IO_BMClass --NB_JOBS=16 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_IO_BMClass
+python run.py --plot_paths=plot_paths_IO_BMClass_dict
+```
+
 
 
 
@@ -595,6 +712,12 @@ train model on Physionet Dataset of [Latent ODEs for Irregularly-Sampled Time Se
 python run.py --params=params_list_NJODE1_physionet --NB_JOBS=32 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_NJODE1_physionet --crossval=crossval_dict_NJODE1_physionet
 ```
 
+------------
+# Changes and potantial backward incompatibilities
 
+- Changed naming of `eval_loss` -> `val_loss`, `eval_time` -> `val_time` and `which_eval_loss` -> `which_val_loss`. 
+  This might cause problems when loading old models, where the metric_id-x.csv files use the old column naming.
+  To fix this, one can simply rename the columns in the csv files to the new naming.
+  Moreover, when loading old models where `which_eval_loss` was specified, one has to change this to `which_val_loss` in the saved model_overview.csv file. This can be done with overwriting params option.
 
 

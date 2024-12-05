@@ -55,8 +55,8 @@ data_path = config.data_path
 saved_models_path = "{}saved_models_LOB/".format(data_path)
 flagfile = config.flagfile
 
-METR_COLUMNS = ['epoch', 'train_time', 'eval_time', 'train_loss',
-                'classification_eval_loss']
+METR_COLUMNS = ['epoch', 'train_time', 'val_time', 'train_loss',
+                'classification_val_loss']
 
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -443,7 +443,7 @@ def train(
     model_metric_file = '{}metric_id-{}.csv'.format(model_path, model_id)
 
     # load saved model if wanted/possible
-    best_eval_loss = np.infty
+    best_val_loss = np.infty
     if 'evaluate' in options and options['evaluate']:
         metr_columns = METR_COLUMNS + ['evaluation_f1score']
     else:
@@ -458,8 +458,8 @@ def train(
                 models.get_ckpt_model(
                     model_path_save_last, model, optimizer, device)
             df_metric = pd.read_csv(model_metric_file, index_col=0)
-            best_eval_loss = np.min(
-                df_metric['classification_eval_loss'].values)
+            best_val_loss = np.min(
+                df_metric['classification_val_loss'].values)
             model.retrain_epoch += 1
             model.weight_decay_step()
             initial_print += '\nepoch: {}'.format(model.retrain_epoch)
@@ -529,7 +529,7 @@ def train(
                     y, classes, average="weighted")
                 cl_report = sklearn.metrics.classification_report(y, classes)
 
-        eval_time = time.time() - t
+        val_time = time.time() - t
         train_loss = loss.detach().numpy()
         print_str = "epoch {}, weight={:.5f}, train-loss={:.5f}, " \
                     "classification-eval-loss={:.5f},".format(
@@ -538,12 +538,12 @@ def train(
 
         if 'evaluate' in options and options['evaluate']:
             metric_app.append(
-                [model.retrain_epoch, train_time, eval_time, train_loss,
+                [model.retrain_epoch, train_time, val_time, train_loss,
                  cl_loss_val, eval_f1score])
             print("eval_f1-score={:.5f}".format(eval_f1score))
             print("classification report \n", cl_report)
         else:
-            metric_app.append([model.retrain_epoch, train_time, eval_time,
+            metric_app.append([model.retrain_epoch, train_time, val_time,
                                train_loss, cl_loss_val])
         # save model
         if model.retrain_epoch % save_every == 0:
@@ -555,10 +555,10 @@ def train(
                                    model.epoch, model.retrain_epoch)
             metric_app = []
             print('saved!')
-        if cl_loss_val < best_eval_loss:
+        if cl_loss_val < best_val_loss:
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
-                best_eval_loss, cl_loss_val, model.retrain_epoch))
+                best_val_loss, cl_loss_val, model.retrain_epoch))
             df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
             df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
             df_metric.to_csv(model_metric_file)
@@ -567,7 +567,7 @@ def train(
             models.save_checkpoint(model, optimizer, model_path_save_best,
                                    model.epoch, model.retrain_epoch)
             metric_app = []
-            best_eval_loss = cl_loss_val
+            best_val_loss = cl_loss_val
             print('saved!')
         print("-"*100)
         model.retrain_epoch += 1

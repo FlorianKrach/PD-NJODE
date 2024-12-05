@@ -211,7 +211,7 @@ overview_dict_ODE_DP = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=['data_dict', "evaluation_mean_diff_min"],
 )
@@ -282,9 +282,9 @@ overview_dict_BS_LT = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
-        ("min", "eval_loss", "evaluation_mean_diff",
-         "evaluation_mean_diff_at_min_eval_loss"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
+        ("min", "val_loss", "evaluation_mean_diff",
+         "evaluation_mean_diff_at_min_val_loss"),
     ),
     sortby=['data_dict', "evaluation_mean_diff_min"],
 )
@@ -294,6 +294,64 @@ plot_paths_BS_LT_dict = {
     'which': 'best', 'paths_to_plot': [4,5,6,7,8,],
     'save_extras': {'bbox_inches': 'tight', 'pad_inches': 0.01},}
 
+
+# ------------------------------------------------------------------------------
+# --- long-term predictions training in physionet dataset
+physionetLT_models_path = "{}saved_models_LongTerm_physionet/".format(data_path)
+param_list_physioLT = []
+
+_nn = ((50, 'tanh'),)
+param_dict_physioLT = {
+    'epochs': [175],
+    'batch_size': [50],
+    'save_every': [1],
+    'learning_rate': [0.001],
+    'test_size': [0.2],
+    'hidden_size': [50,],
+    'bias': [True],
+    'dropout_rate': [0.1],
+    'ode_nn': [_nn],
+    'readout_nn': [_nn],
+    'enc_nn': [_nn],
+    'use_rnn': [True,],
+    'solver': ["euler"],
+    'weight': [0.5],
+    'weight_decay': [1.],
+    'input_sig': [True],
+    'level': [2],
+    'dataset': ["physionet"],
+    'dataset_id': [None],
+    'which_loss': ['easy'],
+    'quantization': [0.016],
+    'n_samples': [8000],
+    'saved_models_path': [physionetLT_models_path],
+    'use_current_y_for_ode': [False, True],
+    'use_observation_as_input': [
+        "lambda x: np.random.random(1) < 1-x/350",
+        "lambda x: np.random.random(1) < 1-(x-100)/150",
+        "lambda x: np.random.random(1) < 1-min(x-75,50)/200",
+    ],
+    'val_use_observation_as_input': [True,],
+}
+
+param_list_physioLT += get_parameter_array(param_dict=param_dict_physioLT) # *5
+
+overview_dict_physioLT = dict(
+    ids_from=1, ids_to=len(param_list_physioLT),
+    path=physionetLT_models_path,
+    params_extract_desc=('dataset', 'network_size', 'nb_layers',
+                         'activation_function_1', 'use_rnn',
+                         'readout_nn', 'dropout_rate',
+                         'hidden_size', 'batch_size', 'which_loss',
+                         'use_observation_as_input', 'level', 'input_sig'),
+    val_test_params_extract=(
+        ("max", "epoch", "epoch", "epochs_trained"),
+        ("min", "eval_metric_2", "eval_metric_2", "evaluation_mse_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
+        ("min", "train_loss", "eval_metric_2", "eval_metric_2_train_min"),
+    ),
+    sortby=["evaluation_mse_min"],
+)
 
 
 

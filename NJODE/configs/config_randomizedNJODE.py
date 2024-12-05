@@ -194,7 +194,7 @@ overview_dict_randNJODE_BS = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=['data_dict', "evaluation_mean_diff_min"],
 )

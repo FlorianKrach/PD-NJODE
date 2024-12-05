@@ -538,8 +538,8 @@ overview_dict_NJODE1_climate = dict(
                               "test_metric", "test_metric_min"),
                              ("min", "eval_metric",
                               "test_metric", "test_metric_evaluation_min"),
-                             ("min", "eval_loss",
-                              "test_metric", "test_metric_eval_loss_min"),
+                             ("min", "val_loss",
+                              "test_metric", "test_metric_val_loss_min"),
                              ), )
 
 crossval_dict_NJODE1_climate = dict(

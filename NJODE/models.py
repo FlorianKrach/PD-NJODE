@@ -8,13 +8,11 @@ implementation of the model for NJ-ODE
 import torch
 import numpy as np
 import os
-import sys
 import iisignature as sig
-import copy as copy
 import sklearn
 import scipy.linalg
 
-import data_utils
+from loss_functions import LOSS_FUN_DICT
 
 
 # =====================================================================================================================
@@ -71,142 +69,6 @@ def get_ckpt_model(ckpt_path, model, optimizer, device):
     model.to(device)
 
 
-def compute_loss(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
-                 weight=0.5, M_obs=None):
-    """
-    loss function from the paper
-    :param X_obs: torch.tensor, the true X values at the observations
-    :param Y_obs: torch.tensor, the predicted values at the observation
-    :param Y_obs_bj: torch.tensor, the predicted values before the jump at the
-            observation
-    :param n_obs_ot: torch.tensor, the number of observations over the entire
-            time-line for each element of the batch
-    :param batch_size: int or float
-    :param eps: float, a small constant which is added before taking torch.sqrt
-            s.t. the sqrt never becomes zero (which would yield NaNs for the
-            gradient)
-    :param weight: float in [0,1], weighting of the two parts of the loss
-            function,
-                0.5: standard loss as described in paper
-                (0.5, 1): more weight to be correct after the jump, can be
-                theoretically justified similar to standard loss
-                1: only the value after the jump is trained
-    :param M_obs: None or torch.tensor, if not None: same size as X_obs with
-            0  and 1 entries, telling which coordinates were observed
-    :return: torch.tensor (with the loss, reduced to 1 dim)
-    """
-    if M_obs is None:
-        inner = (2 * weight * torch.sqrt(torch.sum((X_obs - Y_obs) ** 2, dim=1) + eps) +
-                 2 * (1 - weight) * torch.sqrt(torch.sum((Y_obs_bj - Y_obs) ** 2, dim=1)
-                                               + eps)) ** 2
-    else:
-        inner = (2 * weight * torch.sqrt(
-            torch.sum(M_obs * (X_obs - Y_obs) ** 2, dim=1) + eps) +
-                 2 * (1 - weight) * torch.sqrt(
-                    torch.sum(M_obs * (Y_obs_bj - Y_obs)**2, dim=1) + eps))**2
-    outer = torch.sum(inner / n_obs_ot)
-    return outer / batch_size
-
-
-def compute_loss_2(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
-                   weight=0.5, M_obs=None):
-    """
-    similar to compute_loss, but using X_obs also in second part of loss
-    instead of Y_obs -> should make the learning easier
-    """
-    if M_obs is None:
-        inner = (2*weight * torch.sqrt(torch.sum((X_obs - Y_obs) ** 2, dim=1) + eps) +
-                 2*(1 - weight) * torch.sqrt(torch.sum((Y_obs_bj - X_obs) ** 2, dim=1)
-                                           + eps)) ** 2
-    else:
-        inner = (2*weight * torch.sqrt(
-            torch.sum(M_obs * (X_obs - Y_obs) ** 2, dim=1) + eps) +
-                 2*(1 - weight) * torch.sqrt(
-                    torch.sum(M_obs * (Y_obs_bj - X_obs) ** 2, dim=1)
-                    + eps)) ** 2
-    outer = torch.sum(inner / n_obs_ot)
-    return outer / batch_size
-
-
-def compute_loss_2_1(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
-                   weight=0.5, M_obs=None):
-    """
-    similar to compute_loss, but using X_obs also in second part of loss
-    instead of Y_obs and squaring the two terms directly instead of squaring the
-    sum of the two terms
-    """
-    if M_obs is None:
-        inner = 2*weight * torch.sum((X_obs - Y_obs) ** 2, dim=1) +\
-                2*(1 - weight) * torch.sum((Y_obs_bj - X_obs) ** 2, dim=1)
-    else:
-        inner = 2*weight * torch.sum(M_obs * (X_obs - Y_obs) ** 2, dim=1) +\
-                2*(1-weight) * torch.sum(M_obs * (Y_obs_bj - X_obs) ** 2, dim=1)
-
-    outer = torch.sum(inner / n_obs_ot)
-    return outer / batch_size
-
-
-def compute_loss_noisy_obs(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size,
-                           eps=1e-10, weight=0.5, M_obs=None):
-    """
-    similar to compute_loss, but only using the 2nd term of the original loss
-    function, which enables training with noisy observations
-    """
-    if M_obs is None:
-        M_obs = 1.
-    inner = torch.sum(M_obs * (Y_obs_bj - X_obs) ** 2, dim=1)
-
-    outer = torch.sum(inner / n_obs_ot)
-    return outer / batch_size
-
-
-def compute_loss_3(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
-                   weight=0.5, M_obs=None):
-    """
-    loss function with 1-norm instead of 2-norm for the two terms
-    intuitively this should lead to the conditional median instead of mean (not
-    proven)
-
-    :param X_obs: torch.tensor, the true X values at the observations
-    :param Y_obs: torch.tensor, the predicted values at the observation
-    :param Y_obs_bj: torch.tensor, the predicted values before the jump at the
-            observation
-    :param n_obs_ot: torch.tensor, the number of observations over the entire
-            time-line for each element of the batch
-    :param batch_size: int or float
-    :param eps: float, a small constant which is added before taking torch.sqrt
-            s.t. the sqrt never becomes zero (which would yield NaNs for the
-            gradient)
-    :param weight: float in [0,1], weighting of the two parts of the loss
-            function,
-                0.5: standard loss as described in paper
-                (0.5, 1): more weight to be correct after the jump, can be
-                theoretically justified similar to standard loss
-                1: only the value after the jump is trained
-    :param M_obs: None or torch.tensor, if not None: same size as X_obs with
-            0  and 1 entries, telling which coordinates were observed
-    :return: torch.tensor (with the loss, reduced to 1 dim)
-    """
-    if M_obs is None:
-        inner = (2*weight * torch.sum((torch.abs(X_obs - Y_obs)), dim=1) +
-                 2*(1 - weight) * torch.sum((torch.abs(Y_obs_bj - Y_obs)), dim=1))
-    else:
-        inner = (2*weight * torch.sum(M_obs * (torch.abs(X_obs - Y_obs)), dim=1) +
-                 2*(1 - weight) * torch.sum(M_obs * (torch.abs(Y_obs_bj - Y_obs)), dim=1))
-    outer = torch.sum(inner / n_obs_ot)
-    return outer / batch_size
-
-
-LOSS_FUN_DICT = {
-    # dictionary of used loss functions.
-    # Reminder inputs: (X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
-    #   weight=0.5, M_obs=None)
-    'standard': compute_loss,
-    'easy': compute_loss_2,
-    'very_easy': compute_loss_2_1,
-    'noisy_obs': compute_loss_noisy_obs,
-    'abs': compute_loss_3
-}
 
 nonlinears = {  # dictionary of used non-linear activation functions. Reminder inputs
     'tanh': torch.nn.Tanh,
@@ -367,7 +229,7 @@ class FFNN(torch.nn.Module):
     def __init__(self, input_size, output_size, nn_desc, dropout_rate=0.0,
                  bias=True, residual=False, masked=False, recurrent=False,
                  input_sig=False, sig_depth=3, clamp=None, input_t=False,
-                 t_size=None,
+                 t_size=None, nb_outputs=None,
                  **kwargs):
         super().__init__()
 
@@ -386,6 +248,9 @@ class FFNN(torch.nn.Module):
         self.masked = masked
         self.recurrent = recurrent
         self.output_size = output_size
+        self.nb_outputs = nb_outputs
+        if self.nb_outputs is None:
+            self.nb_outputs = 1
         self.input_sig = input_sig
         self.sig_depth = sig_depth
         self.input_t = input_t
@@ -403,7 +268,7 @@ class FFNN(torch.nn.Module):
                 "the LSTM output size"
             nn_desc = nn_desc[1:]
         self.ffnn = get_ffnn(
-            input_size=in_size, output_size=output_size,
+            input_size=in_size, output_size=self.output_size*self.nb_outputs,
             nn_desc=nn_desc, dropout_rate=dropout_rate, bias=bias)
 
         if residual:
@@ -447,6 +312,12 @@ class FFNN(torch.nn.Module):
             x = torch.concat((h_, c_), dim=1)
         out = self.ffnn(x.float())
 
+        if self.nb_outputs > 1:
+            out = out.reshape(-1, self.output_size, self.nb_outputs)
+            if self.case > 0:
+                identity = identity.reshape(-1, self.output_size, 1).repeat(
+                    1, 1, self.nb_outputs)
+
         if self.case == 0:
             pass
         else:
@@ -473,6 +344,8 @@ class NJODE(torch.nn.Module):
             ode_nn, readout_nn, enc_nn, use_rnn,
             bias=True, dropout_rate=0, solver="euler",
             weight=0.5, weight_decay=1.,
+            input_coords=None, output_coords=None,
+            signature_coords=None,
             **options
     ):
         """
@@ -494,6 +367,9 @@ class NJODE(torch.nn.Module):
                     0: immediate decay to 0.5 after 1st epoch
                     (0,1): exponential decay towards 0.5
         :param level: level for signature transform
+        :param input_coords: list of int, the coordinates of the input
+        :param output_coords: list of int, the coordinates of the output
+        :param signature_coords: list of int, the coordinates of the signature
         :param options: kwargs, used:
                 - "classifier_nn"
                 - "options" with arg a dict passed from train.train
@@ -512,6 +388,9 @@ class NJODE(torch.nn.Module):
         self.weight = weight
         self.weight_decay = weight_decay
         self.use_rnn = use_rnn  # use RNN for jumps
+        self.input_coords = input_coords
+        self.output_coords = output_coords
+        self.signature_coords = signature_coords
 
         # get options from the options of train input
         options1 = options['options']
@@ -521,6 +400,12 @@ class NJODE(torch.nn.Module):
             self.which_loss = 'standard'  # otherwise take the standard loss
         assert self.which_loss in LOSS_FUN_DICT
         print('using loss: {}'.format(self.which_loss))
+        self.loss_quantiles = None
+        self.nb_quantiles = None
+        if "quantile" in self.which_loss:
+            self.loss_quantiles = options1['loss_quantiles']
+            self.nb_quantiles = len(self.loss_quantiles)
+            print("using quantile loss with quantiles:", self.loss_quantiles)
 
         self.residual_enc = True
         self.residual_dec = True
@@ -547,16 +432,21 @@ class NJODE(torch.nn.Module):
         self.level = 2
         if 'level' in options1:
             self.level = options1['level']
-        self.sig_depth = sig.siglength(input_size+1, self.level)
+        self.sig_depth = sig.siglength(len(self.signature_coords)+1, self.level)
         self.masked = False
         if 'masked' in options1:
             self.masked = options1['masked']
-        self.use_y_for_ode = True
+        self.use_y_for_ode = False
         if 'use_y_for_ode' in options1:
             self.use_y_for_ode = options1['use_y_for_ode']
         self.use_current_y_for_ode = False
         if 'use_current_y_for_ode' in options1:
             self.use_current_y_for_ode = options1['use_current_y_for_ode']
+        if self.nb_quantiles is not None and self.nb_quantiles > 1:
+            assert self.use_current_y_for_ode is False, \
+                "Quantile loss not implemented for use_current_y_for_ode"
+            assert self.use_y_for_ode is False, \
+                "Quantile loss not implemented for use_y_for_ode"
         self.coord_wise_tau = False
         if 'coord_wise_tau' in options1 and self.masked:
             self.coord_wise_tau = options1['coord_wise_tau']
@@ -633,11 +523,13 @@ class NJODE(torch.nn.Module):
         self.readout_map = FFNN(
             input_size=hidden_size, output_size=output_size, nn_desc=readout_nn,
             dropout_rate=dropout_rate, bias=bias,
-            residual=self.residual_dec, clamp=self.clamp)
+            residual=self.residual_dec, clamp=self.clamp,
+            nb_outputs=self.nb_quantiles)
         self.get_classifier(classifier_dict=classifier_dict)
 
         self.solver = solver
         self.input_size = input_size
+        self.output_size = output_size
         self.hidden_size = hidden_size
 
         self.apply(init_weights)
@@ -744,7 +636,7 @@ class NJODE(torch.nn.Module):
                 n_obs_ot, return_path=False, get_loss=True, until_T=False,
                 M=None, start_M=None, which_loss=None, dim_to=None,
                 predict_labels=None, return_classifier_out=False,
-                return_at_last_obs=False, epoch=None):
+                return_at_last_obs=False):
         """
         the forward run of this module class, used when calling the module
         instance without a method
@@ -789,18 +681,33 @@ class NJODE(torch.nn.Module):
         :return: torch.tensor (hidden state at final time), torch.tensor (loss),
                     if wanted the paths of t (np.array) and h, y (torch.tensors)
         """
-        if epoch is None:
-            epoch = 0
         if which_loss is None:
             which_loss = self.which_loss
+        if 'quantile' in which_loss:
+            LOSS = LOSS_FUN_DICT[which_loss](self.loss_quantiles)
+        else:
+            LOSS = LOSS_FUN_DICT[which_loss]
 
         last_X = start_X
         batch_size = start_X.size()[0]
         data_dim = start_X.size()[1]
         if dim_to is None:
-            dim_to = data_dim
+            dim_to = len(self.output_coords)
+        out_coords = self.output_coords[:dim_to]
+
+        impute = False
+        if (len(self.input_coords) == len(self.output_coords) and
+                np.all(self.input_coords == self.output_coords) and
+                self.loss_quantiles is None):
+            impute = True
+        if not impute and self.use_y_for_ode:
+            raise ValueError(
+                "use_y_for_ode can only be used when imputation is possible, "
+                "i.e., when input and output coordinates are the same")
+
+
         if self.coord_wise_tau:
-            tau = torch.tensor([[0.0]]).repeat(batch_size, data_dim).to(
+            tau = torch.tensor([[0.0]]).repeat(batch_size, self.input_size).to(
                 self.device)
         else:
             tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(
@@ -809,18 +716,22 @@ class NJODE(torch.nn.Module):
         loss = torch.tensor(0.).to(self.device)
         c_sig = None
 
-        if self.input_sig or self.use_sig_for_classifier:
-            if self.masked:
+        if (self.input_sig or self.use_sig_for_classifier):
+            if X.shape[0] == 0:  # if no data, set signature to 0
+                pass
+            elif self.masked:
                 Mdc = M.clone()
                 Mdc[Mdc==0] = np.nan
                 X_obs_impute = X * Mdc
                 signature = self.get_signature(
-                    times=times, time_ptr=time_ptr, X=X_obs_impute,
-                    obs_idx=obs_idx, start_X=start_X)
+                    times=times, time_ptr=time_ptr,
+                    X=X_obs_impute[:, self.signature_coords],
+                    obs_idx=obs_idx, start_X=start_X[:, self.signature_coords])
             else:
                 signature = self.get_signature(
-                    times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
-                    start_X=start_X)
+                    times=times, time_ptr=time_ptr,
+                    X=X[:, self.signature_coords],
+                    obs_idx=obs_idx, start_X=start_X[:, self.signature_coords])
 
             # in beginning, no path was observed => set sig to 0
             current_sig = np.zeros((batch_size, self.sig_depth))
@@ -830,11 +741,13 @@ class NJODE(torch.nn.Module):
         if self.masked:
             if start_M is None:
                 start_M = torch.ones_like(start_X)
+                start_M = start_M[:, self.input_coords]
         else:
             start_M = None
 
         h = self.encoder_map(
-            start_X, mask=start_M, sig=c_sig,
+            start_X[:, self.input_coords], mask=start_M,
+            sig=c_sig,
             h=torch.zeros((batch_size, self.hidden_size)).to(self.device),
             t=torch.cat((tau, current_time - tau), dim=1).to(self.device))
         # if self.encoder_map.use_lstm:
@@ -858,7 +771,8 @@ class NJODE(torch.nn.Module):
                     delta_t_ = obs_time - current_time
                 if self.solver == 'euler':
                     h, current_time = self.ode_step(
-                        h, delta_t_, current_time, last_X=last_X, tau=tau,
+                        h, delta_t_, current_time,
+                        last_X=last_X[:, self.input_coords], tau=tau,
                         signature=c_sig, current_y=self.readout_map(h))
                     current_time_nb = int(round(current_time / delta_t))
                 else:
@@ -881,21 +795,41 @@ class NJODE(torch.nn.Module):
                     M_obs = torch.from_numpy(M[start:end]).to(self.device)
                 else:
                     M_obs = M[start:end]
+                M_obs_in = M_obs[:, self.input_coords]
+                M_obs_out = M_obs[:, out_coords]
+                M_obs_sig = M_obs[:, self.signature_coords]
             else:
                 M_obs = None
+                M_obs_in = None
+                M_obs_out = None
+                M_obs_sig = None
 
             # decide whether to use observation as input
             if self.training:  # check whether model is in training or eval mode
-                use_as_input = self.use_observation_as_input(epoch)
+                use_as_input = self.use_observation_as_input(self.epoch)
             else:
-                use_as_input = self.val_use_observation_as_input(epoch)
+                use_as_input = self.val_use_observation_as_input(self.epoch)
 
             # update signature
             if self.input_sig or self.use_sig_for_classifier:
-                for j in i_obs:
-                    current_sig[j, :] = signature[j][current_sig_nb[j]]
-                current_sig_nb[i_obs] += 1
+                for ij, j in enumerate(i_obs):
+                    # the signature is updated only if one of the sig-coords is
+                    #   observed -> hence, it can happen that even though the
+                    #   j-th batch sample is observed, the signature is not
+                    #   updated because none of the sig-coords is observed
+                    if M_obs_sig is None or M_obs_sig[ij].sum() > 0:
+                        current_sig[j, :] = signature[j][current_sig_nb[j]]
+                        current_sig_nb[j] += 1
                 if use_as_input:
+                    # TODO: this is not fully correct, since if we didn't
+                    #   use some intermediate observations, the signature still
+                    #   has their information when using the signature up to
+                    #   some later observation. However, this just means that
+                    #   during training, the model conditions on a (slightly)
+                    #   different sigma-algebra (if the signature is used), but
+                    #   for inference the model should still work correctly.
+                    #   Especially, if we are interested in predicting
+                    #   \hat{X}_{t,s}
                     c_sig = torch.from_numpy(current_sig).float().to(
                         self.device)
 
@@ -905,19 +839,22 @@ class NJODE(torch.nn.Module):
                 X_obs_impute = X_obs
                 temp = h.clone()
                 if self.masked:
-                    X_obs_impute = X_obs * M_obs + (torch.ones_like(
-                        M_obs.long()) - M_obs) * Y_bj[i_obs.long()]
+                    if impute:
+                        # self imputation only possible if input and output are
+                        #    the same and no quantile loss is used
+                        X_obs_impute = X_obs * M_obs + (torch.ones_like(
+                            M_obs.long()) - M_obs) * Y_bj[i_obs.long()]
+                    else:
+                        # otherwise set all masked entries to last value of X
+                        X_obs_impute = X_obs * M_obs + (1-M_obs) * last_X
                 c_sig_iobs = None
                 if self.input_sig:
                     c_sig_iobs = c_sig[i_obs]
-                # if self.encoder_map.use_lstm:
-                #     h[:, self.hidden_size//2:] = self.c_
                 temp[i_obs.long()] = self.encoder_map(
-                    X_obs_impute, mask=M_obs, sig=c_sig_iobs, h=h[i_obs],
+                    X_obs_impute[:, self.input_coords],
+                    mask=M_obs_in, sig=c_sig_iobs, h=h[i_obs],
                     t=torch.cat((tau[i_obs], current_time - tau[i_obs]), dim=1))
                 h = temp
-                # if self.encoder_map.use_lstm:
-                #     self.c_ = torch.chunk(h.clone(), chunks=2, dim=1)[1]
                 Y = self.readout_map(h)
 
                 # update h and sig at last observation
@@ -927,24 +864,28 @@ class NJODE(torch.nn.Module):
                 Y = Y_bj
 
             if get_loss:
-                loss = loss + LOSS_FUN_DICT[which_loss](
-                    X_obs=X_obs[:, :dim_to], Y_obs=Y[i_obs.long(), :dim_to],
+                # INFO: X_obs has input and output coordinates, out_coords only
+                #   has the output coordinates until dim_to; Y_obs has only the
+                #   output coordinates, so taking them until dim_to corresponds
+                #   to the out_coords
+                loss = loss + LOSS(
+                    X_obs=X_obs[:, out_coords], Y_obs=Y[i_obs.long(), :dim_to],
                     Y_obs_bj=Y_bj[i_obs.long(), :dim_to],
                     n_obs_ot=n_obs_ot[i_obs.long()], batch_size=batch_size,
-                    weight=self.weight, M_obs=M_obs)
+                    weight=self.weight, M_obs=M_obs_out)
 
             # make update of last_X and tau, that is not inplace 
             #    (otherwise problems in autograd)
             if use_as_input:
                 temp_X = last_X.clone()
                 temp_tau = tau.clone()
-                if self.masked and self.use_y_for_ode:
+                if self.use_y_for_ode:
                     temp_X[i_obs.long()] = Y[i_obs.long()]
                 else:
                     temp_X[i_obs.long()] = X_obs_impute
                 if self.coord_wise_tau:
                     _M = torch.zeros_like(temp_tau)
-                    _M[i_obs] = M_obs
+                    _M[i_obs] = M_obs[:, self.input_coords]
                     temp_tau[_M==1] = obs_time.astype(np.float64)
                 else:
                     temp_tau[i_obs.long()] = obs_time.astype(np.float64)
@@ -1043,19 +984,23 @@ class NJODE(torch.nn.Module):
 
         dim = start_X.shape[1]
         dim_to = dim
+        output_dim_to = len(self.output_coords)
         if mult is not None and mult > 1:
             dim_to = round(dim/mult)
+            output_dim_to = round(len(self.output_coords)/mult)
 
         _, _, path_t, path_h, path_y = self.forward(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, None,
             return_path=True, get_loss=False, until_T=True, M=M,
-            start_M=start_M, dim_to=dim_to)
+            start_M=start_M, dim_to=output_dim_to)
 
         if true_paths is None:
             if M is not None:
                 M = M.detach().numpy()[:, :dim_to]
+            if X.shape[0] > 0:  # if no data (eg. bc. obs_perc=0, not possible)
+                X = X.detach().numpy()[:, :dim_to]
             _, true_path_t, true_path_y = stockmodel.compute_cond_exp(
-                times, time_ptr, X.detach().numpy()[:, :dim_to],
+                times, time_ptr, X,
                 obs_idx.detach().numpy(),
                 delta_t, T, start_X.detach().numpy()[:, :dim_to],
                 n_obs_ot.detach().numpy(),
@@ -1066,20 +1011,23 @@ class NJODE(torch.nn.Module):
             which_t_ind = []
             for t in path_t:
                 which_t_ind.append(np.argmin(np.abs(true_t - t)))
-            true_path_y = true_paths[:, :dim_to, which_t_ind]
+            # INFO: first get the correct output coordinate, then the correct
+            #   time index; afterwards transpose to [time, batch_size, dim]
+            true_path_y = true_paths[:, self.output_coords[:output_dim_to], :][
+                :, :, which_t_ind]
             true_path_y = np.transpose(true_path_y, axes=(2, 0, 1))
             true_path_t = true_t[which_t_ind]
 
         if path_y.detach().numpy().shape == true_path_y.shape:
-            eval_loss = diff_fun(path_y.detach().numpy(), true_path_y)
+            eval_metric = diff_fun(path_y.detach().numpy(), true_path_y)
         else:
             print(path_y.detach().numpy().shape)
             print(true_path_y.shape)
             raise ValueError("Shapes do not match!")
         if return_paths:
-            return eval_loss, path_t, true_path_t, path_y, true_path_y
+            return eval_metric, path_t, true_path_t, path_y, true_path_y
         else:
-            return eval_loss
+            return eval_metric
 
     def evaluate_LOB(
             self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
@@ -1144,12 +1092,12 @@ class NJODE(torch.nn.Module):
             t_ind = np.argmin(np.abs(path_t - t))
             predicted_vals[i, :, 0] = path_y[t_ind, i, :]
 
-        eval_loss = np.nanmean(
+        eval_metric = np.nanmean(
             (predicted_vals[:, coord_to_compare, 0] -
              true_predict_vals[:, coord_to_compare, 0])**2,
             axis=(0,1))
 
-        ref_eval_loss = np.nanmean(
+        ref_eval_metric = np.nanmean(
             (true_samples[:, coord_to_compare, -1] -
              true_predict_vals[:, coord_to_compare, 0])**2,
             axis=(0,1))
@@ -1181,20 +1129,20 @@ class NJODE(torch.nn.Module):
                     true_predict_labels[:, 0], predicted_labels,
                     average="weighted")
             if class_report:
-                print("eval-mse: {:.5f}".format(eval_loss))
+                print("eval-mse: {:.5f}".format(eval_metric))
                 print("f1-score: {:.5f}".format(f1_scores))
                 print("classification report \n",
                       sklearn.metrics.classification_report(
                           true_predict_labels[:, 0], predicted_labels,))
 
         if return_paths:
-            return eval_loss, ref_eval_loss, f1_scores, path_t, path_y, \
+            return eval_metric, ref_eval_metric, f1_scores, path_t, path_y, \
                    predicted_vals[:, :, 0], predicted_labels
         else:
-            return eval_loss, f1_scores
+            return eval_metric, f1_scores
 
     def get_pred(self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
-                 M=None, start_M=None):
+                 n_obs_ot, M=None, start_M=None, which_loss=None):
         """
         get predicted path
         :param times: see forward
@@ -1209,12 +1157,12 @@ class NJODE(torch.nn.Module):
         :return: dict, with prediction y and times t
         """
         self.eval()
-        _, _, path_t, path_h, path_y = self.forward(
+        h, loss, path_t, path_h, path_y = self.forward(
             times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
-            delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=None,
-            return_path=True, get_loss=False, until_T=True, M=M,
-            start_M=start_M)
-        return {'pred': path_y, 'pred_t': path_t}
+            delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
+            return_path=True, get_loss=True, until_T=True, M=M,
+            start_M=start_M, which_loss=which_loss)
+        return {'pred': path_y, 'pred_t': path_t, 'loss': loss}
 
     def forward_classifier(self, x, y):
         # after last observation has been processed, apply classifier if wanted
@@ -1970,15 +1918,15 @@ class randomizedNJODE(torch.nn.Module):
             true_path_t = true_t[which_t_ind]
 
         if path_y.detach().numpy().shape == true_path_y.shape:
-            eval_loss = diff_fun(path_y.detach().numpy(), true_path_y)
+            eval_metric = diff_fun(path_y.detach().numpy(), true_path_y)
         else:
             print(path_y.detach().numpy().shape)
             print(true_path_y.shape)
             raise ValueError("Shapes do not match!")
         if return_paths:
-            return eval_loss, path_t, true_path_t, path_y, true_path_y
+            return eval_metric, path_t, true_path_t, path_y, true_path_y
         else:
-            return eval_loss
+            return eval_metric
 
     def evaluate_LOB(
             self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
@@ -2043,12 +1991,12 @@ class randomizedNJODE(torch.nn.Module):
             t_ind = np.argmin(np.abs(path_t - t))
             predicted_vals[i, :, 0] = path_y[t_ind, i, :]
 
-        eval_loss = np.nanmean(
+        eval_metric = np.nanmean(
             (predicted_vals[:, coord_to_compare, 0] -
              true_predict_vals[:, coord_to_compare, 0])**2,
             axis=(0,1))
 
-        ref_eval_loss = np.nanmean(
+        ref_eval_metric = np.nanmean(
             (true_samples[:, coord_to_compare, -1] -
              true_predict_vals[:, coord_to_compare, 0])**2,
             axis=(0,1))
@@ -2080,20 +2028,20 @@ class randomizedNJODE(torch.nn.Module):
                     true_predict_labels[:, 0], predicted_labels,
                     average="weighted")
             if class_report:
-                print("eval-mse: {:.5f}".format(eval_loss))
+                print("eval-mse: {:.5f}".format(eval_metric))
                 print("f1-score: {:.5f}".format(f1_scores))
                 print("classification report \n",
                       sklearn.metrics.classification_report(
                           true_predict_labels[:, 0], predicted_labels,))
 
         if return_paths:
-            return eval_loss, ref_eval_loss, f1_scores, path_t, path_y, \
+            return eval_metric, ref_eval_metric, f1_scores, path_t, path_y, \
                    predicted_vals[:, :, 0], predicted_labels
         else:
-            return eval_loss, f1_scores
+            return eval_metric, f1_scores
 
     def get_pred(self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
-                 M=None, start_M=None):
+                 n_obs_ot, M=None, start_M=None, which_loss=None, dim_to=None):
         """
         get predicted path
         :param times: see forward
@@ -2108,12 +2056,12 @@ class randomizedNJODE(torch.nn.Module):
         :return: dict, with prediction y and times t
         """
         self.eval()
-        _, _, path_t, path_h, path_y = self.forward(
+        h, loss, path_t, path_h, path_y = self.forward(
             times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
-            delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=None,
-            return_path=True, get_loss=False, until_T=True, M=M,
-            start_M=start_M)
-        return {'pred': path_y, 'pred_t': path_t}
+            delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
+            return_path=True, get_loss=True, until_T=True, M=M,
+            start_M=start_M, which_loss=which_loss, dim_to=dim_to)
+        return {'pred': path_y, 'pred_t': path_t, 'loss': loss}
 
     def forward_classifier(self, x, y):
         # after last observation has been processed, apply classifier if wanted

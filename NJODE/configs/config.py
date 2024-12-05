@@ -7,6 +7,9 @@ from configs.config_LOB import *
 from configs.config_randomizedNJODE import *
 from configs.config_NJmodel import *
 from configs.config_NJODE3 import *
+from configs.config_ODE import *
+from configs.config_ParamFilter import *
+from configs.config_Rainfall import *
 
 import numpy as np
 import socket
@@ -420,7 +423,7 @@ overview_dict_FBM1 = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mean_diff_min"],
 )
@@ -485,7 +488,7 @@ overview_dict_BM2D_1 = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mean_diff_min"],
 )
@@ -703,7 +706,7 @@ overview_dict_physio = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "eval_metric_2",
          "eval_metric_2", "evaluation_mse_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mse_min"],
 )
@@ -776,7 +779,7 @@ overview_dict_climate = dict(
          "test_metric", "test_metric_eval_min"),
         ("min", "eval_metric", "eval_metric", "eval_metric_min"),
         ("min", "test_metric", "test_metric", "test_metric_min"),
-        ("min", "eval_loss", "test_metric", "test_metric_eval_loss_min"),
+        ("min", "val_loss", "test_metric", "test_metric_val_loss_min"),
     ),
     sortby=["data_index", "test_metric_eval_min"],
 )
@@ -876,7 +879,7 @@ overview_dict_DP = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=['data_dict', "evaluation_mean_diff_min"],
 )
@@ -942,7 +945,7 @@ overview_dict_BMFilter_1 = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mean_diff_min"],
 )
@@ -1008,7 +1011,7 @@ overview_dict_BMTimeLag = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mean_diff_min"],
 )

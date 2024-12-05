@@ -57,7 +57,7 @@ data_path = config.data_path
 train_data_path = config.training_data_path
 saved_models_path = config.saved_models_path
 
-METR_COLUMNS = ['epoch', 'train_time', 'eval_time', 'train_loss', 'eval_loss',
+METR_COLUMNS = ['epoch', 'train_time', 'val_time', 'train_loss', 'val_loss',
                 'eval_metric', 'test_loss', 'test_metric']
 default_ode_nn = ((50, 'tanh'), (50, 'tanh'))
 default_readout_nn = ((50, 'tanh'), (50, 'tanh'))
@@ -278,6 +278,11 @@ def train(
         'options': options}
     desc = json.dumps(params_dict, sort_keys=True)
 
+    # add additional values to params_dict (not to be shown in the description)
+    params_dict['input_coords'] = np.arange(input_size)
+    params_dict['output_coords'] = np.arange(input_size)
+    params_dict['signature_coords'] = np.arange(input_size)
+
     # get overview file
     resume_training = False
     if ('parallel' in options and options['parallel'] is False) or \
@@ -467,7 +472,7 @@ def train(
         t = time.time()
         loss_val, mse_val = evaluate_model(
             model, dl_val, device, options, delta_t, T)
-        eval_time = time.time() - t
+        val_time = time.time() - t
         train_loss = loss.detach().numpy()
 
         print("epoch {}, weight={:.5f}, train-loss={:.5f}, "
@@ -486,7 +491,7 @@ def train(
         print("test-loss={:.5f}, test-metric={:.5f}".format(
             loss_test, mse_test))
 
-        metric_app.append([model.epoch, train_time, eval_time, train_loss,
+        metric_app.append([model.epoch, train_time, val_time, train_loss,
                            loss_val, mse_val, loss_test, mse_test])
 
         # save model

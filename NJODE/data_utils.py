@@ -112,7 +112,8 @@ def create_dataset(
     mask_probs = None
     timelag_in_dt_steps = None
     timelag_shift1 = True
-    if "masked" in hyperparam_dict and hyperparam_dict['masked'] is not None:
+    if ("masked" in hyperparam_dict
+            and hyperparam_dict['masked'] not in [None, False]):
         masked = True
         if isinstance(hyperparam_dict['masked'], float):
             masked_lambda = hyperparam_dict['masked']
@@ -595,9 +596,10 @@ def _get_dataset_name_id_from_dict(data_dict):
     df_overview, _ = get_dataset_overview()
     which = df_overview.loc[df_overview["description"] == desc].index
     if len(which) == 0:
-        ValueError("the given dataset does not exist yet, please generate it "
-                   "first using data_utils.py. \ndata_dict: {}".format(
-            data_dict))
+        raise ValueError(
+            "the given dataset does not exist yet, please generate it "
+            "first using data_utils.py. \ndata_dict: {}".format(
+                data_dict))
     elif len(which) > 1:
         print("WARNING: multiple datasets match the description, returning the "
               "last one. To uniquely identify the wanted dataset, please "

@@ -138,7 +138,7 @@ overview_dict_BM_NoisyObs = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "evaluation_mean_diff",
          "evaluation_mean_diff", "evaluation_mean_diff_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mean_diff_min"],
 )
@@ -202,7 +202,7 @@ overview_dict_physio_N3 = dict(
         ("max", "epoch", "epoch", "epochs_trained"),
         ("min", "eval_metric_2",
          "eval_metric_2", "evaluation_mse_min"),
-        ("min", "eval_loss", "eval_loss", "eval_loss_min"),
+        ("min", "val_loss", "val_loss", "val_loss_min"),
     ),
     sortby=["evaluation_mse_min"],
 )
@@ -265,7 +265,7 @@ overview_dict_climate_N3 = dict(
          "test_metric", "test_metric_eval_min"),
         ("min", "eval_metric", "eval_metric", "eval_metric_min"),
         ("min", "test_metric", "test_metric", "test_metric_min"),
-        ("min", "eval_loss", "test_metric", "test_metric_eval_loss_min"),
+        ("min", "val_loss", "test_metric", "test_metric_val_loss_min"),
     ),
     sortby=["data_index", "test_metric_eval_min"],
 )

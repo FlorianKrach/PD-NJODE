@@ -40,7 +40,7 @@ import matplotlib.pyplot as plt
 def plot_loss_diff(
         path, filename, losses, xlab='epoch',
         ylab='$[\Psi(Y) - \Psi(\hat{X})]/\Psi(\hat{X})$',
-        save_extras={}, fig_size=None,
+        save_extras={}, fig_size=None, logx=False, logy=False,
 ):
     """
     function to plot the loss difference
@@ -65,15 +65,22 @@ def plot_loss_diff(
         plt.xlabel(xlab)
     if ylab is not None:
         plt.ylabel(ylab)
+    if logx:
+        plt.xscale('log')
+    if logy:
+        plt.yscale('log')
     plt.savefig(os.path.join(path, filename), **save_extras)
     plt.close()
 
+    return os.path.join(path, filename)
 
-def plot_losses(files, names, time_col='epoch', 
-                col1='eval_loss', col2='optimal_eval_loss', 
+
+def plot_losses(files=None, names=None, time_col='epoch',
+                col1='val_loss', col2='optimal_val_loss', 
                 relative_error=True,
                 filename='plot.pdf', path='./',
                 save_extras={'bbox_inches':'tight', 'pad_inches': 0.01},
+                saved_models_path=None, model_ids=None, send=True,
                 **kwargs):
     """
     function to plot the loss vs. epoch of trained models
@@ -87,8 +94,21 @@ def plot_losses(files, names, time_col='epoch',
     :param path: str, output path
     :param save_extras: dict, additional kwargs for saving
     :param kwargs: additional key-word arguments, passed on
+        - logx: bool, whether to plot x-axis logarithmic
+        - logy: bool, whether to plot y-axis logarithmic
     """
+    if saved_models_path is not None:
+        path = saved_models_path
+
     losses = []
+    if files is None:
+        files = []
+        for model_id in model_ids:
+            file = os.path.join(
+                saved_models_path, 'id-{}'.format(model_id),
+                'metric_id-{}.csv'.format(model_id))
+            files.append(file)
+
     for file, name in zip(files, names):
         df = pd.read_csv(file, index_col=0)
         t = df[time_col].values
@@ -96,7 +116,16 @@ def plot_losses(files, names, time_col='epoch',
         if relative_error:
             loss = loss / df[col2].values
         losses.append([t, loss, name])
-    plot_loss_diff(path, filename, losses, save_extras=save_extras, **kwargs)
+
+    file = plot_loss_diff(
+        path, filename, losses, save_extras=save_extras, **kwargs)
+
+    if send:
+        SBM.send_notification(
+            text=None, files=[file],
+            text_for_files="loss plot",
+            chat_id=config.CHAT_ID)
+
 
 
 def generate_training_progress_gif(model_id, which_path=1):
@@ -422,8 +451,8 @@ def plot_loss_and_metric(
         save_extras={'bbox_inches': 'tight', 'pad_inches': 0.01},
         file_name="loss_and_metric-id{}.pdf",
         time_col='epoch',
-        cols=('train_loss', 'eval_loss', 'evaluation_mean_diff'),
-        names=('train_loss', 'eval_loss', 'eval_metric')
+        cols=('train_loss', 'val_loss', 'evaluation_mean_diff'),
+        names=('train_loss', 'val_loss', 'eval_metric')
 ):
     """
     function to plot the losses and metric in one plot with subplots to see
