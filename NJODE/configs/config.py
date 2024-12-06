@@ -9,7 +9,7 @@ from configs.config_NJmodel import *
 from configs.config_NJODE3 import *
 from configs.config_ODE import *
 from configs.config_ParamFilter import *
-from configs.config_Rainfall import *
+from configs.config_Quantiles import *
 
 import numpy as np
 import socket
