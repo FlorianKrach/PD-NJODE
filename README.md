@@ -424,6 +424,9 @@ python run.py --params=param_list_randNJODE_3 --NB_JOBS=1 --NB_CPUS=3 --first_id
 
 --------------------------------------------------------------------------------
 # Experimental: learning quantiles with NJODE
+
+Parameters defined in [config_Quantiles.py](NJODE/configs/config_Quantiles.py).
+
 get datasets:
 ```shell
 python data_utils.py --dataset_name=BMandQuantiles --dataset_params=BM_Quantiles --seed=0
