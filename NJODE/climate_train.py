@@ -264,6 +264,30 @@ def train(
     if "delta_t" in options:
         delta_t = options['delta_t']
 
+    # get variance or covariance coordinates if wanted
+    compute_variance = None
+    var_size = 0
+    if 'compute_variance' in options:
+        compute_variance = options['compute_variance']
+        if compute_variance == 'covariance':
+            var_size = output_size ** 2
+            initial_print += '\ncompute covariance of size {}'.format(
+                var_size)
+        elif compute_variance not in [None, False]:
+            compute_variance = 'variance'
+            var_size = output_size
+            initial_print += '\ncompute (marginal) variance of size {}'.format(
+                var_size)
+        else:
+            compute_variance = None
+            initial_print += '\nno variance computation'
+            var_size = 0
+        # the models variance output is the Cholesky decomposition of the
+        #   covariance matrix or the square root of the marginal variance.
+        # for Y being the entire model output, the variance output is
+        #   W=Y[:,-var_size:]
+        output_size += var_size
+
     # get params_dict
     params_dict = {
         'input_size': input_size, 'epochs': epochs,
@@ -282,6 +306,8 @@ def train(
     params_dict['input_coords'] = np.arange(input_size)
     params_dict['output_coords'] = np.arange(input_size)
     params_dict['signature_coords'] = np.arange(input_size)
+    params_dict['compute_variance'] = compute_variance
+    params_dict['var_size'] = var_size
 
     # get overview file
     resume_training = False
@@ -555,7 +581,7 @@ def evaluate_model(model, dl_val, device, options, delta_t, T):
                 times_idx = b["index_val"]
 
             if 'other_model' not in options:
-                hT, e_loss, path_t, path_h, path_y = model(
+                hT, e_loss, path_t, path_h, path_y, path_var = model(
                     times, time_ptr, X, obs_idx, delta_t, T, start_X,
                     n_obs_ot, until_T=True,
                     return_path=True, get_loss=True, M=M)

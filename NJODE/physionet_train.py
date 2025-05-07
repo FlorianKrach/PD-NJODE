@@ -150,6 +150,12 @@ def train(
             'load_best'     bool, whether to load the best checkpoint instead of
                             the last checkpoint when loading the model. Mainly
                             used for evaluating model at the best checkpoint.
+            'obs_noise'     None or dict, whether to add noise to the
+                            observations. The dict should contain the keys:
+                            'std_factor', 'seed'
+            'random_state'  None or int, random state for the data loader for
+                            train-test split
+            'seed'          int, random seed for the model training
     """
     dataset = 'physionet'
 
@@ -173,6 +179,13 @@ def train(
         torch.manual_seed(0)
         np.random.seed(0)
         cudnn.deterministic = True
+
+    # set the random seed for reproducibility if wanted
+    if 'seed' in options:
+        seed = options['seed']
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        initial_print += '\nseed={}'.format(seed)
 
     # set number of CPUs
     torch.set_num_threads(N_CPUS)
@@ -202,6 +215,10 @@ def train(
         args_dict["obs_noise"] = options["obs_noise"]
     else:
         args_dict["obs_noise"] = None
+    if "random_state" in options:
+        args_dict["random_state"] = options["random_state"]
+    else:
+        args_dict["random_state"] = None
 
     data_objects = parse_dataset.parse_datasets(args, device)
 
@@ -217,6 +234,30 @@ def train(
     delta_t = quantization/48.
     if "delta_t" in options:
         delta_t = options['delta_t']
+
+    # get variance or covariance coordinates if wanted
+    compute_variance = None
+    var_size = 0
+    if 'compute_variance' in options:
+        compute_variance = options['compute_variance']
+        if compute_variance == 'covariance':
+            var_size = output_size ** 2
+            initial_print += '\ncompute covariance of size {}'.format(
+                var_size)
+        elif compute_variance not in [None, False]:
+            compute_variance = 'variance'
+            var_size = output_size
+            initial_print += '\ncompute (marginal) variance of size {}'.format(
+                var_size)
+        else:
+            compute_variance = None
+            initial_print += '\nno variance computation'
+            var_size = 0
+        # the models variance output is the Cholesky decomposition of the
+        #   covariance matrix or the square root of the marginal variance.
+        # for Y being the entire model output, the variance output is
+        #   W=Y[:,-var_size:]
+        output_size += var_size
 
     # get params_dict
     params_dict = {
@@ -238,6 +279,8 @@ def train(
     params_dict['input_coords'] = np.arange(input_size)
     params_dict['output_coords'] = np.arange(input_size)
     params_dict['signature_coords'] = np.arange(input_size)
+    params_dict['compute_variance'] = compute_variance
+    params_dict['var_size'] = var_size
 
     # get overview file
     resume_training = False
@@ -321,6 +364,30 @@ def train(
     if not resume_training:
         initial_print += '\ninitiate new model ...'
         df_metric = pd.DataFrame(columns=metr_columns)
+
+    # ---------------- plot/eval only ---------------
+    plot_only = False
+    if 'plot_only' in options:
+        plot_only = options['plot_only']
+    if plot_only:
+        print("!! evaluate only mode !!")
+        print(initial_print)
+        model.epoch -= 1
+        initial_print += '\nevaluating ...'
+        eval_save_path = os.path.join(model_path, "eval_paths/")
+        filename = evaluate_model(
+            model, dl_test, device, options, delta_t, T,
+            save_path=eval_save_path, id=model_id)
+        if SEND:
+            files_to_send = [filename]
+            caption = "Physionet - {} - id={}".format(model_name, model_id)
+            SBM.send_notification(
+                text='finished Physionet plot-only: {}, id={}\n'.format(
+                    model_name, model_id),
+                chat_id=config.CHAT_ID,
+                files=files_to_send,
+                text_for_files=caption)
+        return 0
 
     # ---------------- TRAINING ----------------
     skip_training = True
@@ -437,7 +504,8 @@ def train(
     return 0
 
 
-def evaluate_model(model, dl_val, device, options, delta_t, T):
+def evaluate_model(model, dl_val, device, options, delta_t, T, save_path=None,
+                   id=None):
     with torch.no_grad():
         loss_val = 0
         num_obs = 0
@@ -467,7 +535,7 @@ def evaluate_model(model, dl_val, device, options, delta_t, T):
                 times_val = b["times_val"]
 
             if 'other_model' not in options:
-                hT, e_loss, path_t, path_h, path_y = model(
+                hT, e_loss, path_t, path_h, path_y, path_var = model(
                     times, time_ptr, X, obs_idx, delta_t, T, start_X,
                     n_obs_ot, until_T=True,
                     return_path=True, get_loss=True, M=M
@@ -478,7 +546,31 @@ def evaluate_model(model, dl_val, device, options, delta_t, T):
             time_indices = get_comparison_times_ind(path_t, times_val)
             path_y = path_y.detach().numpy()
             path_y = path_y[time_indices, :, :]
+            # -> shape after: (batch_size, times, dim)
             path_y = np.transpose(path_y, (1, 0, 2))
+
+            # save the paths if wanted
+            #   -> the loop is only over one large batch, so no need for
+            #   concatenation
+            if save_path is not None:
+                path_var = path_var.detach().numpy()
+                path_var = path_var[time_indices, :, :]
+                path_var = np.transpose(path_var, (1, 0, 2))
+
+                filename = os.path.join(
+                    save_path, "eval_paths-id_{}.npy".format(id))
+                makedirs(save_path)
+                print("times_val:", times_val)
+                print("sizes: times_val: {}, vals_val: {}, mask_val: {}, "
+                      "path_y: {}, path_var: {}".format(
+                    times_val.shape, vals_val.shape, mask_val.shape,
+                    path_y.shape, path_var.shape))
+                with open(filename, 'wb') as f:
+                    np.save(f, times_val)
+                    np.save(f, vals_val)
+                    np.save(f, mask_val)
+                    np.save(f, path_y)
+                    np.save(f, path_var)
 
             mse_loss = (((path_y - vals_val)**2) * mask_val).sum()
             loss_val += e_loss.detach().numpy()
@@ -499,6 +591,9 @@ def evaluate_model(model, dl_val, device, options, delta_t, T):
         mse_val /= num_obs
         loss_val /= count
         mse_val_2 /= count
+
+    if save_path is not None:
+        return filename
     return loss_val, mse_val, mse_val_2
 
 
@@ -525,6 +620,22 @@ def get_comparison_times_ind(path_t, times_val):
 
     return indices
 
+
+def load_saved_eval_paths(filename):
+    """
+    function to load the saved evaluation paths
+    :param filename: str, path to the file
+    :return: times_val, vals_val, mask_val, path_y, path_var
+    """
+    with open(filename, 'rb') as f:
+        times = np.load(f)
+        true_vals = np.load(f)
+        masks = np.load(f)
+        predicted_vals = np.load(f)
+        predicted_std = np.load(f)
+
+    # shape: (batch_size, times, dim)
+    return times, true_vals, masks, predicted_vals, predicted_std
 
 # TODO (FK): to be as described in paper, in physionet_LODE.py in class
 #  PhysioNet in array params, the first line of param-names has to be

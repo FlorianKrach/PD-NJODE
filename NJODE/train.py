@@ -23,6 +23,7 @@ import matplotlib.colors
 from torch.backends import cudnn
 import gc
 import scipy.stats as stats
+import warnings
 
 from configs import config
 import models
@@ -156,148 +157,167 @@ def train(
     :param saved_models_path: str, where to save the models
     :param DEBUG: int, if >0, then the model is in debug mode
     :param options: kwargs, used keywords:
-            'test_data_dict'    None, str or dict, if no None, this data_dict is
-                            used to define the dataset for plot_only and
-                            evaluation (if evaluate=True)
-            'func_appl_X'   list of functions (as str, see data_utils)
-                            to apply to X
-            'masked'        bool, whether the data is masked (i.e. has
-                            incomplete observations)
-            'save_extras'   bool, dict of options for saving the plots
-            'plot_variance' bool, whether to plot also variance
-            'std_factor'    float, the factor by which the std is multiplied
-                            when plotting the variance
-            'parallel'      bool, used by parallel_train.parallel_training
-            'resume_training'   bool, used by parallel_train.parallel_training
-            'plot_only'     bool, whether the model is used only to plot after
-                            initiating or loading (i.e. no training) and exit
-                            afterwards (used by demo)
-            'ylabels'       list of str, see plot_one_path_with_pred()
-            'legendlabels'  list of str, see plot_one_path_with_pred()
-            'plot_same_yaxis'   bool, whether to plot the same range on y axis
-                            for all dimensions
-            'plot_obs_prob' bool, whether to plot the observation probability
-            'which_loss'    default: 'standard', see models.LOSS_FUN_DICT for
-                            choices. suggested: 'easy' or 'very_easy'
-            'loss_quantiles'    None or np.array, if loss is 'quantile', then
-                            this is the array of quantiles to use
-            'residual_enc_dec'  bool, whether resNNs are used for encoder and
-                            readout NN, used by models.NJODE. the provided value
-                            is overwritten by 'residual_enc' & 'residual_dec' if
-                            they are provided. default: False
-            'residual_enc'  bool, whether resNNs are used for encoder NN,
-                            used by models.NJODE.
-                            default: True if use_rnn=False, else: False (this is
-                            for backward compatibility)
-            'residual_dec'  bool, whether resNNs are used for readout NN,
-                            used by models.NJODE. default: True
-            'use_y_for_ode' bool, whether to use y (after jump) or x_impute for
-                            the ODE as input, only in masked case, default: True
-            'use_current_y_for_ode' bool, whether to use the current y as input
-                            to the ode. this should make the training more
-                            stable in the case of long windows without
-                            observations (cf. literature about stable output
-                            feedback). default: False
-            'coord_wise_tau'    bool, whether to use a coordinate wise tau
-            'input_sig'     bool, whether to use the signature as input
-            'level'         int, level of the signature that is used
-            'input_current_t'   bool, whether to additionally input current time
-                            to the ODE function f, default: False
-            'enc_input_t'   bool, whether to use the time as input for the
-                            encoder network. default: False
-            'train_readout_only'    bool, whether to only train the readout
-                            network
-            'training_size' int, if given and smaller than
-                            dataset_size*(1-test_size), then this is the umber
-                            of samples used for the training set (randomly
-                            selected out of original training set)
-            'evaluate'      bool, whether to evaluate the model in the test set
-                            (i.e. not only compute the val_loss, but also
-                            compute the mean difference between the true and the
-                            predicted paths comparing at each time point)
-            'load_best'     bool, whether to load the best checkpoint instead of
-                            the last checkpoint when loading the model. Mainly
-                            used for evaluating model at the best checkpoint.
-            'gradient_clip' float, if provided, then gradient values are clipped
-                            by the given value
-            'clamp'         float, if provided, then output of model is clamped
-                            to +/- the given value
-            'other_model'   one of {'GRU_ODE_Bayes', randomizedNJODE};
-                            the specifieed model is trained instead of the
-                            controlled ODE-RNN model.
-                            Other options/inputs might change or loose their
-                            effect.
-            'use_observation_as_input'  bool, whether to use the observations as
-                            input to the model or whether to only use them for
-                            the loss function (this can be used to make the
-                            model learn to predict well far into the future).
-                            can be a float in (0,1) to use an observation with
-                            this probability as input. can also be a string
-                            defining a function (when evaluated) that takes the
-                            current epoch as input and returns a bool whether to
-                            use the current observation as input (this can be a
-                            random function, i.e. the output can depend on
-                            sampling a random variable). default: true
-            'val_use_observation_as_input'  bool, None, float or str, same as
-                            'use_observation_as_input', but for the validation
-                            set. default: None, i.e. same as for training set
-            'ode_input_scaling_func'    None or str in {'id', 'tanh'}, the
-                            function used to scale inputs to the neuralODE.
-                            default: tanh
-            'use_cond_exp'  bool, whether to use the conditional expectation
-                            as reference for model evaluation, default: True
-            'eval_use_true_paths'   bool, whether to use the true paths for
-                            evaluation (instead of the conditional expectation)
-                            default: False
-            'which_val_loss'   str, see models.LOSS_FUN_DICT for choices, which
-                            loss to use for evaluation, default: 'easy'
-            'input_coords'  list of int or None, which coordinates to use as
-                            input. overwrites the setting from dataset_metadata.
-                            if None, then all coordinates are used.
-            'output_coords' list of int or None, which coordinates to use as
-                            output. overwrites the setting from
-                            dataset_metadata. if None, then all coordinates are
-                            used.
-            'signature_coords'  list of int or None, which coordinates to use as
-                            signature coordinates. overwrites the setting from
-                            dataset_metadata. if None, then all input
-                            coordinates are used.
-            'plot_only_evaluate' bool, whether to evaluate the model when in
-                            plot_only mode
-            'plot_error_dist'   None or dict, if not None, then the kwargs for
-                            the plot_error_distribution function
+        'test_data_dict'    None, str or dict, if no None, this data_dict is
+                        used to define the dataset for plot_only and
+                        evaluation (if evaluate=True)
+        'func_appl_X'   list of functions (as str, see data_utils)
+                        to apply to X
+        'masked'        bool, whether the data is masked (i.e. has
+                        incomplete observations)
+        'save_extras'   bool, dict of options for saving the plots
+        'plot_variance' bool, whether to plot also variance
+        'std_factor'    float, the factor by which the std is multiplied
+                        when plotting the variance
+        'parallel'      bool, used by parallel_train.parallel_training
+        'resume_training'   bool, used by parallel_train.parallel_training
+        'plot_only'     bool, whether the model is used only to plot after
+                        initiating or loading (i.e. no training) and exit
+                        afterwards (used by demo)
+        'ylabels'       list of str, see plot_one_path_with_pred()
+        'legendlabels'  list of str, see plot_one_path_with_pred()
+        'plot_same_yaxis'   bool, whether to plot the same range on y axis
+                        for all dimensions
+        'plot_obs_prob' bool, whether to plot the observation probability
+        'which_loss'    default: 'standard', see models.LOSS_FUN_DICT for
+                        choices. suggested: 'easy' or 'very_easy'
+        'loss_quantiles'    None or np.array, if loss is 'quantile', then
+                        this is the array of quantiles to use
+        'residual_enc_dec'  bool, whether resNNs are used for encoder and
+                        readout NN, used by models.NJODE. the provided value
+                        is overwritten by 'residual_enc' & 'residual_dec' if
+                        they are provided. default: False
+        'residual_enc'  bool, whether resNNs are used for encoder NN,
+                        used by models.NJODE.
+                        default: True if use_rnn=False, else: False (this is
+                        for backward compatibility)
+        'residual_dec'  bool, whether resNNs are used for readout NN,
+                        used by models.NJODE. default: True
+        'use_y_for_ode' bool, whether to use y (after jump) or x_impute for
+                        the ODE as input, only in masked case, default: True
+        'use_current_y_for_ode' bool, whether to use the current y as input
+                        to the ode. this should make the training more
+                        stable in the case of long windows without
+                        observations (cf. literature about stable output
+                        feedback). default: False
+        'coord_wise_tau'    bool, whether to use a coordinate wise tau
+        'input_sig'     bool, whether to use the signature as input
+        'level'         int, level of the signature that is used
+        'input_current_t'   bool, whether to additionally input current time
+                        to the ODE function f, default: False
+        'enc_input_t'   bool, whether to use the time as input for the
+                        encoder network. default: False
+        'train_readout_only'    bool, whether to only train the readout
+                        network
+        'training_size' int, if given and smaller than
+                        dataset_size*(1-test_size), then this is the umber
+                        of samples used for the training set (randomly
+                        selected out of original training set)
+        'evaluate'      bool, whether to evaluate the model in the test set
+                        (i.e. not only compute the val_loss, but also
+                        compute the mean difference between the true and the
+                        predicted paths comparing at each time point)
+        'load_best'     bool, whether to load the best checkpoint instead of
+                        the last checkpoint when loading the model. Mainly
+                        used for evaluating model at the best checkpoint.
+        'gradient_clip' float, if provided, then gradient values are clipped
+                        by the given value
+        'clamp'         float, if provided, then output of model is clamped
+                        to +/- the given value
+        'other_model'   one of {'GRU_ODE_Bayes', randomizedNJODE};
+                        the specifieed model is trained instead of the
+                        controlled ODE-RNN model.
+                        Other options/inputs might change or loose their
+                        effect.
+        'use_observation_as_input'  bool, whether to use the observations as
+                        input to the model or whether to only use them for
+                        the loss function (this can be used to make the
+                        model learn to predict well far into the future).
+                        can be a float in (0,1) to use an observation with
+                        this probability as input. can also be a string
+                        defining a function (when evaluated) that takes the
+                        current epoch as input and returns a bool whether to
+                        use the current observation as input (this can be a
+                        random function, i.e. the output can depend on
+                        sampling a random variable). default: true
+        'val_use_observation_as_input'  bool, None, float or str, same as
+                        'use_observation_as_input', but for the validation
+                        set. default: None, i.e. same as for training set
+        'ode_input_scaling_func'    None or str in {'id', 'tanh'}, the
+                        function used to scale inputs to the neuralODE.
+                        default: tanh
+        'use_cond_exp'  bool, whether to use the conditional expectation
+                        as reference for model evaluation, default: True
+        'eval_use_true_paths'   bool, whether to use the true paths for
+                        evaluation (instead of the conditional expectation)
+                        default: False
+        'which_val_loss'   str, see models.LOSS_FUN_DICT for choices, which
+                        loss to use for evaluation, default: 'easy'
+        'input_coords'  list of int or None, which coordinates to use as
+                        input. overwrites the setting from dataset_metadata.
+                        if None, then all coordinates are used.
+        'output_coords' list of int or None, which coordinates to use as
+                        output. overwrites the setting from
+                        dataset_metadata. if None, then all coordinates are
+                        used.
+        'signature_coords'  list of int or None, which coordinates to use as
+                        signature coordinates. overwrites the setting from
+                        dataset_metadata. if None, then all input
+                        coordinates are used.
+        'compute_variance'   None, bool or str, if None, then no variance
+                        computation is done. if bool, then the (marginal)
+                        variance is computed. if str "covariance", then the
+                        covariance matrix is computed. ATTENTION: the model
+                        output corresponds to the square root of the
+                        variance (or the Cholesky decomposition of the
+                        covariance matrix, respectivel), so if W is the
+                        model's output corresponding to the variance, then
+                        the models variance estimate is V=W^T*W or W^2,
+                        depending whether the covariance or marginal
+                        variance is estimated.
+                        default: None
+        'var_weight'    float, weight of the variance loss term in the loss
+                        function, default: 1
+        'which_var_loss'   None or int, which loss to use for the variance loss
+                        term. default: None, which leads to using default choice
+                        of the main loss function (which aligns with structure
+                        of main loss function as far as reasonable). see
+                        models.LOSS_FUN_DICT for choices (currently in {1,2,3}).
+        'plot_only_evaluate' bool, whether to evaluate the model when in
+                        plot_only mode
+        'plot_error_dist'   None or dict, if not None, then the kwargs for
+                        the plot_error_distribution function
 
-                -> 'GRU_ODE_Bayes' has the following extra options with the
-                    names 'GRU_ODE_Bayes'+<option_name>, for the following list
-                    of possible choices for <options_name>:
-                    '-mixing'   float, default: 0.0001, weight of the 2nd loss
-                                term of GRU-ODE-Bayes
-                    '-solver'   one of {"euler", "midpoint", "dopri5"}, default:
-                                "euler"
-                    '-impute'   bool, default: False,
-                                whether to impute the last parameter
-                                estimation of the p_model for the next ode_step
-                                as input. the p_model maps (like the
-                                readout_map) the hidden state to the
-                                parameter estimation of the normal distribution.
-                    '-logvar'   bool, default: True, wether to use logarithmic
-                                (co)variace -> hardcodinng positivity constraint
-                    '-full_gru_ode'     bool, default: True,
-                                        whether to use the full GRU cell
-                                        or a smaller version, see GRU-ODE-Bayes
-                    '-p_hidden'         int, default: hidden_size, size of the
-                                        inner hidden layer of the p_model
-                    '-prep_hidden'      int, default: hidden_size, in the
-                                        observational cell (i.e. jumps) a prior
-                                        matrix multiplication transforms the
-                                        input to have the size
-                                        prep_hidden * input_size
-                    '-cov_hidden'       int, default: hidden_size, size of the
-                                        inner hidden layer of the covariate_map.
-                                        the covariate_map is used as a mapping
-                                        to get the initial h (for controlled
-                                        ODE-RNN this is done by the encoder)
-                -> 'randomizedNJODE' has same options as NJODE
+            -> 'GRU_ODE_Bayes' has the following extra options with the
+                names 'GRU_ODE_Bayes'+<option_name>, for the following list
+                of possible choices for <options_name>:
+                '-mixing'   float, default: 0.0001, weight of the 2nd loss
+                            term of GRU-ODE-Bayes
+                '-solver'   one of {"euler", "midpoint", "dopri5"}, default:
+                            "euler"
+                '-impute'   bool, default: False,
+                            whether to impute the last parameter
+                            estimation of the p_model for the next ode_step
+                            as input. the p_model maps (like the
+                            readout_map) the hidden state to the
+                            parameter estimation of the normal distribution.
+                '-logvar'   bool, default: True, wether to use logarithmic
+                            (co)variace -> hardcodinng positivity constraint
+                '-full_gru_ode'     bool, default: True,
+                                    whether to use the full GRU cell
+                                    or a smaller version, see GRU-ODE-Bayes
+                '-p_hidden'         int, default: hidden_size, size of the
+                                    inner hidden layer of the p_model
+                '-prep_hidden'      int, default: hidden_size, in the
+                                    observational cell (i.e. jumps) a prior
+                                    matrix multiplication transforms the
+                                    input to have the size
+                                    prep_hidden * input_size
+                '-cov_hidden'       int, default: hidden_size, size of the
+                                    inner hidden layer of the covariate_map.
+                                    the covariate_map is used as a mapping
+                                    to get the initial h (for controlled
+                                    ODE-RNN this is done by the encoder)
+            -> 'randomizedNJODE' has same options as NJODE
     """
 
     global ANOMALY_DETECTION, USE_GPU, SEND, N_CPUS, N_DATASET_WORKERS
@@ -427,7 +447,7 @@ def train(
         data_test = data_utils.IrregularDataset(
             model_name=test_ds, time_id=test_ds_id, idx=None)
 
-    # get data-loader for training
+    # get functions to apply to the paths in X
     if 'func_appl_X' in options:  # list of functions to apply to the paths in X
         initial_print += '\napply functions to X'
         functions = options['func_appl_X']
@@ -445,6 +465,35 @@ def train(
         collate_fn, mult = data_utils.CustomCollateFnGen(None)
         mult = 1
 
+    # get variance or covariance coordinates if wanted
+    compute_variance = None
+    var_size = 0
+    if 'compute_variance' in options:
+        if functions is not None:
+            warnings.warn(
+                "function application to X and concurrent variance/covariance "
+                "computation might lead to problems! Use carefully!",
+                UserWarning)
+        compute_variance = options['compute_variance']
+        if compute_variance == 'covariance':
+            var_size = output_size**2
+            initial_print += '\ncompute covariance of size {}'.format(var_size)
+        elif compute_variance not in [None, False]:
+            compute_variance = 'variance'
+            var_size = output_size
+            initial_print += '\ncompute (marginal) variance of size {}'.format(
+                var_size)
+        else:
+            compute_variance = None
+            initial_print += '\nno variance computation'
+            var_size = 0
+        # the models variance output is the Cholesky decomposition of the
+        #   covariance matrix or the square root of the marginal variance.
+        # for Y being the entire model output, the variance output is
+        #   W=Y[:,-var_size:]
+        output_size += var_size
+
+    # get data-loader for training
     dl = DataLoader(  # class to iterate over training data
         dataset=data_train, collate_fn=collate_fn,
         shuffle=True, batch_size=batch_size, num_workers=N_DATASET_WORKERS)
@@ -473,7 +522,7 @@ def train(
     # get additional plotting information
     plot_variance = False
     std_factor = 1  # factor with which the std is multiplied
-    if functions is not None and mult > 1:
+    if (functions is not None and mult > 1) or (compute_variance is not None):
         if 'plot_variance' in options:
             plot_variance = options['plot_variance']
         if 'std_factor' in options:
@@ -509,6 +558,12 @@ def train(
     if 'plot_only' in options:
         plot_only = options['plot_only']
     if use_cond_exp and not plot_only:
+        if compute_variance is not None:
+            warnings.warn(
+                "optimal loss might be wrong, since the conditional "
+                "variance is also learned, which is not accounted for in "
+                "computation of the optimal loss",
+                UserWarning)
         store_cond_exp = True
         if dl_val != dl_test:
             store_cond_exp = False
@@ -553,6 +608,8 @@ def train(
     params_dict['input_coords'] = input_coords
     params_dict['output_coords'] = output_coords
     params_dict['signature_coords'] = signature_coords
+    params_dict['compute_variance'] = compute_variance
+    params_dict['var_size'] = var_size
 
     # get overview file
     resume_training = False
@@ -905,16 +962,18 @@ def train(
                 loss_val += c_loss.detach().numpy()
                 num_obs += 1  # count number of observations
 
-                # if functions are applied, also compute the loss when only
-                #   using the coordinates where function was not applied
+                # if functions are applied or var loss is computed, also compute
+                #   the loss when only using the coordinates where function was
+                #   not applied & without computing the variance loss
                 #   -> this can be compared to the optimal-eval-loss
-                if mult is not None and mult > 1:
+                if (mult is not None and mult > 1) or (compute_variance is not None):
                     if 'other_model' not in options:
                         hT_corrected, c_loss_corrected = model(
                             times, time_ptr, X, obs_idx, delta_t, T, start_X,
                             n_obs_ot, return_path=False, get_loss=True, M=M,
                             start_M=start_M, which_loss=which_val_loss,
-                            dim_to=original_output_dim)
+                            dim_to=original_output_dim,
+                            compute_variance_loss=False,)
                     loss_val_corrected += c_loss_corrected.detach().numpy()
 
             # mean squared difference evaluation
@@ -934,7 +993,7 @@ def train(
             print_str = "epoch {}, weight={:.5f}, train-loss={:.5f}, " \
                         "optimal-val-loss={:.5f}, val-loss={:.5f}, ".format(
                 model.epoch, model.weight, train_loss, opt_val_loss, loss_val)
-            if mult is not None and mult > 1:
+            if (mult is not None and mult > 1) or (compute_variance is not None):
                 print_str += "\ncorrected (i.e. without additional dims of " \
                              "funct_appl_X)-val-loss={:.5f}, ".format(
                     loss_val_corrected)
@@ -1355,6 +1414,22 @@ def plot_one_path_with_pred(
         if np.any(path_var_pred < 0):
             print('WARNING: some predicted cond. variances below 0 -> clip')
             path_var_pred = np.maximum(0, path_var_pred)
+        path_std_pred = np.sqrt(path_var_pred)
+    elif plot_variance and (model.compute_variance is not None):
+        path_var_pred = res["pred_var"].detach().numpy()
+        if model.compute_variance == "variance":
+            path_var_pred = path_var_pred[:, :, 0:out_dim]**2
+        elif model.compute_variance == "covariance":
+            d = int(np.sqrt(path_var_pred.shape[2]))
+            path_var_pred = path_var_pred.reshape(
+                path_y_pred.shape[0], path_y_pred.shape[1], d, d)
+            path_var_pred = np.matmul(
+                path_var_pred.transpose(0,1,3,2), path_var_pred)
+            path_var_pred = np.diagonal(path_var_pred, axis1=2, axis2=3)
+            path_var_pred = path_var_pred[:, :, 0:out_dim]
+        else:
+            raise ValueError("compute_variance {} not implemented".format(
+                model.compute_variance))
         path_std_pred = np.sqrt(path_var_pred)
     else:
         plot_variance = False

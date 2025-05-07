@@ -314,6 +314,30 @@ def train(
 
     initial_print += "\n{}".format(dataset_metadata)
 
+    # get variance or covariance coordinates if wanted
+    compute_variance = None
+    var_size = 0
+    if 'compute_variance' in options:
+        compute_variance = options['compute_variance']
+        if compute_variance == 'covariance':
+            var_size = output_size ** 2
+            initial_print += '\ncompute covariance of size {}'.format(
+                var_size)
+        elif compute_variance not in [None, False]:
+            compute_variance = 'variance'
+            var_size = output_size
+            initial_print += '\ncompute (marginal) variance of size {}'.format(
+                var_size)
+        else:
+            compute_variance = None
+            initial_print += '\nno variance computation'
+            var_size = 0
+        # the models variance output is the Cholesky decomposition of the
+        #   covariance matrix or the square root of the marginal variance.
+        # for Y being the entire model output, the variance output is
+        #   W=Y[:,-var_size:]
+        output_size += var_size
+
     # get params_dict
     params_dict = {  # create a dictionary of the wanted parameters
         'input_size': input_size, 'epochs': epochs,
@@ -329,6 +353,13 @@ def train(
         'classifier_nn': classifier_nn, 'classifier_dict': classifier_dict,
         'options': options}
     desc = json.dumps(params_dict, sort_keys=True)  # serialize to a JSON formatted str
+
+    # add additional values to params_dict (not to be shown in the description)
+    params_dict['input_coords'] = np.arange(input_size)
+    params_dict['output_coords'] = np.arange(input_size)
+    params_dict['signature_coords'] = np.arange(input_size)
+    params_dict['compute_variance'] = compute_variance
+    params_dict['var_size'] = var_size
 
     # get overview file
     resume_training = False

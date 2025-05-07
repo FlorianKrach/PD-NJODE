@@ -142,6 +142,8 @@ def parse_datasets(args, device):
 
 		# Combine and shuffle samples from physionet Train and physionet Test
 		total_dataset = train_dataset_obj[:len(train_dataset_obj)]
+		print("samples train split: ", len(train_dataset_obj))
+		print("samples test split: ", len(test_dataset_obj))
 
 		if not args.classif:
 			# Concatenate samples from original Train and Test sets
@@ -149,8 +151,12 @@ def parse_datasets(args, device):
 			total_dataset = total_dataset + test_dataset_obj[:len(test_dataset_obj)]
 
 		# Shuffle and split
+		if args.random_state is None:
+			random_state = 42
+		else:
+			random_state = args.random_state
 		train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.8, 
-			random_state = 42, shuffle = True)
+			random_state = random_state, shuffle = True)
 
 		record_id, tt, vals, mask, labels, noise = train_data[0]
 

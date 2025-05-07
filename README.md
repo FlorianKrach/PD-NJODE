@@ -1,4 +1,4 @@
-# Path-Dependent Neural Jump ODEs
+# Neural Jump ODEs
 
 [![DOI](https://zenodo.org/badge/507857738.svg)](https://zenodo.org/badge/latestdoi/507857738)
 
@@ -440,6 +440,36 @@ python run.py --plot_paths=plot_paths_BMQ_dict
 ```
 
 
+--------------------------------------------------------------------------------
+# Direct Variance Prediction with NJODE
+
+Instead of predicting the variance via the first 2 moments, which can lead to numerical instabilities (and therefore implausible negative values or non positive-semi definite covariance matrices),
+we can also directly predict the marginal variance or the covariance matrix using the NJODE model.
+In particular, we define the model with two output parts $(Y,W)$, where $Y$ is the original output and $W$ is the variance/covariance output.
+Then we can train $Y$ with the standard loss function to approximate the conditional expectation of the process $X$ and train $V=W^2$ (in the marginal variance case) or $V=W^\top W$ (in the covariance matrix case) to approximate the process $(X-Y)^2$.
+By using the square $V$ of $W$ to approximate $(X-Y)^2$, we have a hard-coded way to avoid numerical instabilities (negative values of the variance or non positive-semi definite covariance matrices), 
+since the network output $W$ corresponds to the standard deviation, which is squared to get the variance (in particular, $W$ can have negative entries, which are simply interpreted as positive).
+By the theoretical results, the model output $W$ or $V$, respectively, learns to approximate the conditional expectation of $(X-Y)^2$ arbitrarily well, which coincides with the conditional variance of $X$.  
+See the [NJODE website](https://floriankrach.github.io/njode/index.html) for more details.
+
+Parameters defined in [config_uncertainty.py](NJODE/configs/config_uncertainty.py).
+
+
+train NJODE on Physionet dataset with variance prediction:
+```shell
+python run.py --params=param_list_physio_U --NB_JOBS=25 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_physio_U
+python run.py --plot_paths=eval_physio_U_dict
+```
+
+get datasets:
+```shell
+python data_utils.py --dataset_name=BM --dataset_params=BM_dict_U --seed=0
+```
+
+train NJODE on BM dataset with variance prediction:
+```shell
+python run.py --params=param_list_BMandVar_U --NB_JOBS=25 --NB_CPUS=1 --first_id=1
+```
 
 
 

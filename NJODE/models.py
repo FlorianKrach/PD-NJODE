@@ -345,7 +345,7 @@ class NJODE(torch.nn.Module):
             bias=True, dropout_rate=0, solver="euler",
             weight=0.5, weight_decay=1.,
             input_coords=None, output_coords=None,
-            signature_coords=None,
+            signature_coords=None, compute_variance=None, var_size=0,
             **options
     ):
         """
@@ -370,6 +370,11 @@ class NJODE(torch.nn.Module):
         :param input_coords: list of int, the coordinates of the input
         :param output_coords: list of int, the coordinates of the output
         :param signature_coords: list of int, the coordinates of the signature
+        :param compute_variance: None or one of {"variance", "covariance"},
+                whether to compute the (marginal) variance or covariance matrix
+        :param var_size: int, the size of the model variance estimate; this is
+                already included in the output_size, but the variance
+                coordinates are not included in the output_coords
         :param options: kwargs, used:
                 - "classifier_nn"
                 - "options" with arg a dict passed from train.train
@@ -391,6 +396,11 @@ class NJODE(torch.nn.Module):
         self.input_coords = input_coords
         self.output_coords = output_coords
         self.signature_coords = signature_coords
+        self.compute_variance = compute_variance
+        self.var_size = var_size
+        self.var_weight = 1.
+        self.which_var_loss = None
+
 
         # get options from the options of train input
         options1 = options['options']
@@ -406,6 +416,12 @@ class NJODE(torch.nn.Module):
             self.loss_quantiles = options1['loss_quantiles']
             self.nb_quantiles = len(self.loss_quantiles)
             print("using quantile loss with quantiles:", self.loss_quantiles)
+        if "var_weight" in options1:
+            self.var_weight = options1['var_weight']
+            print("using variance loss weight:", self.var_weight)
+        if "which_var_loss" in options1:
+            self.which_var_loss = options1['which_var_loss']
+            print("using variance loss:", self.which_var_loss)
 
         self.residual_enc = True
         self.residual_dec = True
@@ -636,7 +652,7 @@ class NJODE(torch.nn.Module):
                 n_obs_ot, return_path=False, get_loss=True, until_T=False,
                 M=None, start_M=None, which_loss=None, dim_to=None,
                 predict_labels=None, return_classifier_out=False,
-                return_at_last_obs=False):
+                return_at_last_obs=False, compute_variance_loss=True):
         """
         the forward run of this module class, used when calling the module
         instance without a method
@@ -677,6 +693,8 @@ class NJODE(torch.nn.Module):
         :param return_at_last_obs: bool, whether to return the hidden state at
                 the last observation time or at the final time
         :param epoch: int, the current epoch
+        :param compute_variance_loss: bool, whether to compute the variance
+                loss (in case self.compute_variance is not None). default: True
 
         :return: torch.tensor (hidden state at final time), torch.tensor (loss),
                     if wanted the paths of t (np.array) and h, y (torch.tensors)
@@ -756,7 +774,13 @@ class NJODE(torch.nn.Module):
         if return_path:
             path_t = [0]
             path_h = [h]
-            path_y = [self.readout_map(h)]
+            y = self.readout_map(h)
+            if self.var_size > 0:
+                path_y = [y[:, :-self.var_size]]
+                path_var = [y[:, -self.var_size:]]
+            else:
+                path_y = [y]
+                path_var = None
         h_at_last_obs = h.clone()
         sig_at_last_obs = c_sig
 
@@ -782,7 +806,12 @@ class NJODE(torch.nn.Module):
                 if return_path:
                     path_t.append(current_time)
                     path_h.append(h)
-                    path_y.append(self.readout_map(h))
+                    y = self.readout_map(h)
+                    if self.var_size > 0:
+                        path_y.append(y[:, :-self.var_size])
+                        path_var.append(y[:, -self.var_size:])
+                    else:
+                        path_y.append(y)
 
             # Reached an observation - only update those elements of the batch, 
             #    for which an observation is made
@@ -843,7 +872,7 @@ class NJODE(torch.nn.Module):
                         # self imputation only possible if input and output are
                         #    the same and no quantile loss is used
                         X_obs_impute = X_obs * M_obs + (torch.ones_like(
-                            M_obs.long()) - M_obs) * Y_bj[i_obs.long()]
+                            M_obs.long()) - M_obs) * Y_bj[i_obs.long(), :data_dim]
                     else:
                         # otherwise set all masked entries to last value of X
                         X_obs_impute = X_obs * M_obs + (1-M_obs) * last_X
@@ -864,15 +893,30 @@ class NJODE(torch.nn.Module):
                 Y = Y_bj
 
             if get_loss:
+                Y_var_bj = None
+                Y_var = None
+                if self.var_size > 0:
+                    Y_var_bj = Y_bj[i_obs.long(), -self.var_size:]
+                    Y_var = Y[i_obs.long(), -self.var_size:]
+
                 # INFO: X_obs has input and output coordinates, out_coords only
                 #   has the output coordinates until dim_to; Y_obs has only the
-                #   output coordinates, so taking them until dim_to corresponds
-                #   to the out_coords
+                #   output coordinates (+ the var coords appended in the end),
+                #   so taking them until dim_to (which is at max the size of the
+                #   output_coords) corresponds to the out_coords
+                if compute_variance_loss:
+                    compute_variance = self.compute_variance
+                else:
+                    compute_variance = None
                 loss = loss + LOSS(
                     X_obs=X_obs[:, out_coords], Y_obs=Y[i_obs.long(), :dim_to],
                     Y_obs_bj=Y_bj[i_obs.long(), :dim_to],
                     n_obs_ot=n_obs_ot[i_obs.long()], batch_size=batch_size,
-                    weight=self.weight, M_obs=M_obs_out)
+                    weight=self.weight, M_obs=M_obs_out,
+                    compute_variance=compute_variance,
+                    var_weight=self.var_weight,
+                    Y_var_bj=Y_var_bj, Y_var=Y_var, dim_to=dim_to,
+                    which_var_loss=self.which_var_loss)
 
             # make update of last_X and tau, that is not inplace 
             #    (otherwise problems in autograd)
@@ -880,7 +924,7 @@ class NJODE(torch.nn.Module):
                 temp_X = last_X.clone()
                 temp_tau = tau.clone()
                 if self.use_y_for_ode:
-                    temp_X[i_obs.long()] = Y[i_obs.long()]
+                    temp_X[i_obs.long()] = Y[i_obs.long(), :data_dim]
                 else:
                     temp_X[i_obs.long()] = X_obs_impute
                 if self.coord_wise_tau:
@@ -895,7 +939,11 @@ class NJODE(torch.nn.Module):
             if return_path:
                 path_t.append(obs_time)
                 path_h.append(h)
-                path_y.append(Y)
+                if self.var_size > 0:
+                    path_y.append(Y[:, :-self.var_size])
+                    path_var.append(Y[:, -self.var_size:])
+                else:
+                    path_y.append(Y)
 
         # after last observation has been processed, apply classifier if wanted
         cl_out = None
@@ -928,17 +976,25 @@ class NJODE(torch.nn.Module):
                 if return_path:
                     path_t.append(current_time)
                     path_h.append(h)
-                    path_y.append(self.readout_map(h))
+                    y = self.readout_map(h)
+                    if self.var_size > 0:
+                        path_y.append(y[:, :-self.var_size])
+                        path_var.append(y[:, -self.var_size:])
+                    else:
+                        path_y.append(y)
 
         if return_at_last_obs:
             return h_at_last_obs, sig_at_last_obs
         if return_path:
             # path dimension: [time_steps, batch_size, output_size]
+            var_path = None
+            if self.var_size > 0:
+                var_path = torch.stack(path_var)
             if return_classifier_out:
                 return h, loss, np.array(path_t), torch.stack(path_h), \
-                       torch.stack(path_y)[:, :, :dim_to], cl_out
+                       torch.stack(path_y)[:, :, :dim_to], var_path, cl_out
             return h, loss, np.array(path_t), torch.stack(path_h), \
-                   torch.stack(path_y)[:, :, :dim_to]
+                   torch.stack(path_y)[:, :, :dim_to], var_path
         else:
             if return_classifier_out and self.classifier is not None:
                 return h, loss, cl_out
@@ -989,7 +1045,7 @@ class NJODE(torch.nn.Module):
             dim_to = round(dim/mult)
             output_dim_to = round(len(self.output_coords)/mult)
 
-        _, _, path_t, path_h, path_y = self.forward(
+        _, _, path_t, path_h, path_y, path_var = self.forward(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, None,
             return_path=True, get_loss=False, until_T=True, M=M,
             start_M=start_M, dim_to=output_dim_to)
@@ -1079,7 +1135,7 @@ class NJODE(torch.nn.Module):
         if coord_to_compare is None:
             coord_to_compare = np.arange(dim)
 
-        _, _, path_t, path_h, path_y, cl_out = self.forward(
+        _, _, path_t, path_h, path_y, path_var, cl_out = self.forward(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, n_obs_ot,
             return_path=True, get_loss=False, until_T=True, M=None,
             start_M=None, dim_to=None, predict_labels=predict_labels,
@@ -1157,12 +1213,13 @@ class NJODE(torch.nn.Module):
         :return: dict, with prediction y and times t
         """
         self.eval()
-        h, loss, path_t, path_h, path_y = self.forward(
+        h, loss, path_t, path_h, path_y, path_var = self.forward(
             times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx,
             delta_t=delta_t, T=T, start_X=start_X, n_obs_ot=n_obs_ot,
             return_path=True, get_loss=True, until_T=True, M=M,
             start_M=start_M, which_loss=which_loss)
-        return {'pred': path_y, 'pred_t': path_t, 'loss': loss}
+        return {'pred': path_y, 'pred_t': path_t, 'loss': loss,
+                'pred_var': path_var}
 
     def forward_classifier(self, x, y):
         # after last observation has been processed, apply classifier if wanted
