@@ -280,6 +280,10 @@ def create_combined_dataset(
     stockmodel = _STOCK_MODELS[stock_model_names[0]](**hyperparam_dicts[0])
     stock_paths, dt = stockmodel.generate_paths()
     last = stock_paths[:, :, -1]
+    size = stock_paths.shape
+    observed_dates = np.random.random(size=(size[0], size[2]))
+    observed_dates = (observed_dates < obs_perc) * 1
+    observed_dates[:, 0] = 1
 
     # for every other model, add the paths created with this model starting at
     #   last point of previous model
@@ -294,15 +298,16 @@ def create_combined_dataset(
         hyperparam_dicts[i]['model_name'] = stock_model_names[i]
         stockmodel = _STOCK_MODELS[stock_model_names[i]](**hyperparam_dicts[i])
         _stock_paths, dt = stockmodel.generate_paths(start_X=last)
+        size = _stock_paths.shape
+        obs_perc = hyperparam_dicts[i]['obs_perc']
+        _observed_dates = np.random.random(size=(size[0], size[2]))
+        _observed_dates = (_observed_dates < obs_perc) * 1
         assert dt_last == dt
         last = _stock_paths[:, :, -1]
         stock_paths = np.concatenate(
-            [stock_paths, _stock_paths[:, :, 1:]], axis=2
-        )
-
-    size = stock_paths.shape
-    observed_dates = np.random.random(size=(size[0], size[2]))
-    observed_dates = (observed_dates < obs_perc)*1
+            [stock_paths, _stock_paths[:, :, 1:]], axis=2)
+        observed_dates = np.concatenate(
+            [observed_dates, _observed_dates[:, 1:]], axis=1)
     nb_obs = np.sum(observed_dates[:, 1:], axis=1)
 
     time_id = 1

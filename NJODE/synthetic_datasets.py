@@ -1184,27 +1184,32 @@ class BM(StockModel):
     Brownian Motion
     """
 
-    def __init__(self, nb_paths, nb_steps, maturity, dimension, **kwargs):
+    def __init__(
+            self, nb_paths, nb_steps, maturity, dimension, drift=0, **kwargs):
         super().__init__(
-            drift=None, volatility=None, nb_paths=nb_paths,
+            drift=drift, volatility=None, nb_paths=nb_paths,
             nb_steps=nb_steps, S0=0., maturity=maturity,
             sine_coeff=None,)
         assert dimension == 1
 
     def next_cond_exp(self, y, delta_t, current_t):
-        next_y = y
+        next_y = y + self.drift * delta_t
         return next_y
 
     def generate_paths(self, start_X=None):
         spot_paths = np.zeros(
             (self.nb_paths, 1, self.nb_steps + 1))
+        if start_X is not None:
+            spot_paths[:, :, 0] = start_X
         dt = self.dt
 
         random_numbers = np.random.normal(
             0, 1, (self.nb_paths, 1, self.nb_steps)) * np.sqrt(dt)
         W = np.cumsum(random_numbers, axis=2)
 
-        spot_paths[:, 0, 1:] = W[:, 0, :]
+        spot_paths[:, 0, 1:] = (
+                spot_paths[:, :, 0] + W[:, 0, :] +
+                self.drift * np.arange(1, self.nb_steps + 1) * dt)
 
         # stock_path dimension: [nb_paths, dimension, time_steps]
         return spot_paths, dt
