@@ -121,12 +121,13 @@ class ODEFunc(torch.nn.Module):
     def __init__(self, input_size, hidden_size, ode_nn, dropout_rate=0.0,
                  bias=True, input_current_t=False, input_sig=False,
                  sig_depth=3, coord_wise_tau=False, input_scaling_func="tanh",
-                 use_current_y_for_ode=False):
+                 use_current_y_for_ode=False, input_var_t_helper=False):
         super().__init__()  # initialize class with given parameters
         self.input_current_t = input_current_t
         self.input_sig = input_sig
         self.sig_depth = sig_depth
         self.use_current_y_for_ode = use_current_y_for_ode
+        self.input_var_t_helper = input_var_t_helper
         if input_scaling_func in ["id", "identity"]:
             self.sc_fun = torch.nn.Identity()
             print("neuralODE use input scaling with identity (no scaling)")
@@ -144,6 +145,11 @@ class ODEFunc(torch.nn.Module):
                 add += input_size
             else:
                 add += 1
+        if input_var_t_helper:
+            if coord_wise_tau:
+                add += input_size
+            else:
+                add += 1
         if input_sig:
             add += sig_depth
         if use_current_y_for_ode:
@@ -153,7 +159,8 @@ class ODEFunc(torch.nn.Module):
             nn_desc=ode_nn, dropout_rate=dropout_rate, bias=bias
         )
 
-    def forward(self, x, h, tau, tdiff, signature=None, current_y=None):
+    def forward(self, x, h, tau, tdiff, signature=None, current_y=None,
+                delta_t=None):
         # dimension should be (batch, input_size) for x, (batch, hidden) for h, 
         #    (batch, 1) for times
 
@@ -161,6 +168,8 @@ class ODEFunc(torch.nn.Module):
 
         if self.input_current_t:
             input_f = torch.cat([input_f, tau+tdiff], dim=1)
+        if self.input_var_t_helper:
+            input_f = torch.cat([input_f, 1/torch.sqrt(tdiff+delta_t)], dim=1)
         if self.input_sig:
             input_f = torch.cat([input_f, signature], dim=1)
         if self.use_current_y_for_ode:
@@ -442,6 +451,9 @@ class NJODE(torch.nn.Module):
         self.input_current_t = False
         if 'input_current_t' in options1:
             self.input_current_t = options1['input_current_t']
+        self.input_var_t_helper = False
+        if 'input_var_t_helper' in options1:
+            self.input_var_t_helper = options1['input_var_t_helper']
         self.input_sig = False
         if 'input_sig' in options1:
             self.input_sig = options1['input_sig']
@@ -529,7 +541,8 @@ class NJODE(torch.nn.Module):
             input_current_t=self.input_current_t, input_sig=self.input_sig,
             sig_depth=self.sig_depth, coord_wise_tau=self.coord_wise_tau,
             input_scaling_func=self.ode_input_scaling_func,
-            use_current_y_for_ode=self.use_current_y_for_ode)
+            use_current_y_for_ode=self.use_current_y_for_ode,
+            input_var_t_helper=self.input_var_t_helper)
         self.encoder_map = FFNN(
             input_size=input_size, output_size=hidden_size, nn_desc=enc_nn,
             dropout_rate=dropout_rate, bias=bias, recurrent=self.use_rnn,
@@ -579,7 +592,7 @@ class NJODE(torch.nn.Module):
         if self.solver == "euler":
             h = h + delta_t * self.ode_f(
                 x=last_X, h=h, tau=tau, tdiff=current_time - tau,
-                signature=signature, current_y=current_y)
+                signature=signature, current_y=current_y, delta_t=delta_t)
         else:
             raise ValueError("Unknown solver '{}'.".format(self.solver))
 

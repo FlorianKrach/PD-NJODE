@@ -82,6 +82,7 @@ BM_dict_U = {
     'dimension': 1,
 }
 BM_models_path_Unc = "{}saved_models_BM_Uncertainty/".format(data_path)
+_nn = ((50, 'relu'),(50, 'relu'))
 param_dict_BMandVar = {
     'epochs': [200],
     'batch_size': [200],
@@ -114,7 +115,7 @@ param_dict_BMandVar = {
     'plot_same_yaxis': [True],
     'saved_models_path': [BM_models_path_Unc],
     'compute_variance': ['variance'],
-    'var_weight': [1.],
+    'var_weight': [10.],
     'which_var_loss': [1,2,3],
 }
 param_list_BMandVar_U = get_parameter_array(param_dict=param_dict_BMandVar)

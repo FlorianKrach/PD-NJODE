@@ -178,6 +178,8 @@ def train(
         'plot_same_yaxis'   bool, whether to plot the same range on y axis
                         for all dimensions
         'plot_obs_prob' bool, whether to plot the observation probability
+        'plot_true_var' bool, whether to plot the true variance, if available
+                        default: True
         'which_loss'    default: 'standard', see models.LOSS_FUN_DICT for
                         choices. suggested: 'easy' or 'very_easy'
         'loss_quantiles'    None or np.array, if loss is 'quantile', then
@@ -277,6 +279,10 @@ def train(
                         default: None
         'var_weight'    float, weight of the variance loss term in the loss
                         function, default: 1
+        'input_var_t_helper'    bool, whether to use 1/sqrt(Delta_t) as
+                        additional input to the ODE function f. this should help
+                        to better learn the variance of the process.
+                        default: False
         'which_var_loss'   None or int, which loss to use for the variance loss
                         term. default: None, which leads to using default choice
                         of the main loss function (which aligns with structure
@@ -527,6 +533,9 @@ def train(
             plot_variance = options['plot_variance']
         if 'std_factor' in options:
             std_factor = options['std_factor']
+    plot_true_var = True
+    if 'plot_true_var' in options:
+        plot_true_var = options['plot_true_var']
     ylabels = None
     if 'ylabels' in options:
         ylabels = options['ylabels']
@@ -775,6 +784,7 @@ def train(
             testset_metadata['dt'], testset_metadata['maturity'],
             path_to_plot=paths_to_plot, save_path=plot_save_path,
             filename=plot_filename, plot_variance=plot_variance,
+            plot_true_var=plot_true_var,
             functions=functions, std_factor=std_factor,
             use_cond_exp=use_cond_exp, output_coords=output_coords,
             model_name=model_name, save_extras=save_extras, ylabels=ylabels,
@@ -1021,6 +1031,7 @@ def train(
                     stockmodel=stockmodel, delta_t=delta_t, T=T,
                     path_to_plot=paths_to_plot, save_path=plot_save_path,
                     filename=plot_filename, plot_variance=plot_variance,
+                    plot_true_var=plot_true_var,
                     functions=functions, std_factor=std_factor,
                     model_name=model_name, save_extras=save_extras,
                     ylabels=ylabels, use_cond_exp=use_cond_exp,
@@ -1295,7 +1306,8 @@ def plot_error_distribution(
 def plot_one_path_with_pred(
         device, model, batch, stockmodel, delta_t, T,
         path_to_plot=(0,), save_path='', filename='plot_{}.pdf',
-        plot_variance=False, functions=None, std_factor=1,
+        plot_variance=False, plot_true_var=True,
+        functions=None, std_factor=1,
         model_name=None, ylabels=None,
         legendlabels=None,
         save_extras={'bbox_inches': 'tight', 'pad_inches': 0.01},
@@ -1323,6 +1335,7 @@ def plot_one_path_with_pred(
             possibility to put the path number
     :param plot_variance: bool, whether to plot the variance, if supported by
             functions (i.e. square has to be applied)
+    :param plot_true_var: bool, whether to plot the true variance
     :param functions: list of functions (as str), the functions applied to X
     :param std_factor: float, the factor by which std is multiplied
     :param model_name: str or None, name used for model in plots
@@ -1450,7 +1463,8 @@ def plot_one_path_with_pred(
             times, time_ptr, X_, obs_idx.detach().numpy(),
             delta_t, T, start_X_, n_obs_ot.detach().numpy(),
             return_path=True, get_loss=True, weight=model.weight,
-            M=M, store_and_use_stored=reuse_cond_exp, return_var=plot_variance,
+            M=M, store_and_use_stored=reuse_cond_exp,
+            return_var=(plot_variance and plot_true_var),
             which_loss=which_loss, ref_model=ref_model_to_use)
         opt_loss, path_t_true, path_y_true = res_sm[:3]
         if plot_variance and len(res_sm) > 3:

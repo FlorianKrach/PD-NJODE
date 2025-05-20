@@ -44,7 +44,9 @@ class StockModel:
         self.loss = None
         self.path_t = None
         self.path_y = None
+        self.path_var_y = None
 
+        self.return_var_implemented = False
         self.loss_comp_for_pow2_implemented = False
 
     def generate_paths(self, **options):
@@ -66,6 +68,7 @@ class StockModel:
                          n_obs_ot, return_path=True, get_loss=False,
                          weight=0.5, store_and_use_stored=True,
                          start_time=None, which_loss="easy",
+                         return_var=False,
                          **kwargs):
         """
         compute conditional expectation similar to computing the prediction in
@@ -85,22 +88,32 @@ class StockModel:
         :param store_and_use_stored: bool, whether the loss, and cond exp path
             should be stored and reused when calling the function again
         :param start_time: None or float, if float, this is first time point
+        :param return_var: bool, whether to return the variance additionally to
+                the process; only if self.return_var_implemented is True
         :param kwargs: unused, to allow for additional unused inputs
         :return: float (loss), if wanted paths of t and y (np.arrays)
         """
+        if return_var and not self.return_var_implemented:
+            return_var = False
+
         if return_path and store_and_use_stored:
+            res = [self.loss, self.path_t, self.path_y]
+            if return_var:
+                res.append(self.path_var_y)
             if get_loss:
                 if self.path_t is not None and self.loss is not None:
-                    return self.loss, self.path_t, self.path_y
+                    return res
             else:
                 if self.path_t is not None:
-                    return self.loss, self.path_t, self.path_y
+                    return res
         elif store_and_use_stored:
             if get_loss:
                 if self.loss is not None:
                     return self.loss
 
         y = start_X
+        if return_var:
+            var_y = start_X*0
         batch_size = start_X.shape[0]
         current_time = 0.0
         if start_time:
@@ -112,9 +125,13 @@ class StockModel:
             if start_time:
                 path_t = []
                 path_y = []
+                if return_var:
+                    path_var_y = []
             else:
                 path_t = [0.]
                 path_y = [y]
+                if return_var:
+                    path_var_y = [var_y]
 
         for i, obs_time in enumerate(times):
             # the following is needed for the combined stock model datasets
@@ -129,12 +146,17 @@ class StockModel:
                 else:
                     delta_t_ = obs_time - current_time
                 y = self.next_cond_exp(y, delta_t_, current_time)
+                if return_var:
+                    var_y = self.next_cond_exp(
+                        var_y, delta_t_, current_time, variance=True)
                 current_time = current_time + delta_t_
 
                 # Storing the conditional expectation
                 if return_path:
                     path_t.append(current_time)
                     path_y.append(y)
+                    if return_var:
+                        path_var_y.append(var_y)
 
             # Reached an observation - set new interval
             start = time_ptr[i]
@@ -148,6 +170,10 @@ class StockModel:
             temp[i_obs] = X_obs
             y = temp
             Y = y
+            if return_var:
+                temp_var = copy.deepcopy(var_y)
+                temp_var[i_obs] = X_obs*0
+                var_y = temp_var
 
             if get_loss:
                 loss = loss + compute_loss(
@@ -157,6 +183,8 @@ class StockModel:
             if return_path:
                 path_t.append(obs_time)
                 path_y.append(y)
+                if return_var:
+                    path_var_y.append(var_y)
 
         # after every observation has been processed, propagating until T
         while current_time < T - 1e-10 * delta_t:
@@ -165,22 +193,32 @@ class StockModel:
             else:
                 delta_t_ = T - current_time
             y = self.next_cond_exp(y, delta_t_, current_time)
+            if return_var:
+                var_y = self.next_cond_exp(
+                    var_y, delta_t_, current_time, variance=True)
             current_time = current_time + delta_t_
 
             # Storing the predictions.
             if return_path:
                 path_t.append(current_time)
                 path_y.append(y)
+                if return_var:
+                    path_var_y.append(var_y)
 
         if get_loss and store_and_use_stored:
             self.loss = loss
         if return_path and store_and_use_stored:
             self.path_t = np.array(path_t)
             self.path_y = np.array(path_y)
+            if return_var:
+                self.path_var_y = np.array(path_var_y)
 
         if return_path:
             # path dimension: [time_steps, batch_size, output_size]
-            return loss, np.array(path_t), np.array(path_y)
+            res = [loss, np.array(path_t), np.array(path_y)]
+            if return_var:
+                res.append(np.array(path_var_y))
+            return res
         else:
             return loss
 
@@ -1191,9 +1229,13 @@ class BM(StockModel):
             nb_steps=nb_steps, S0=0., maturity=maturity,
             sine_coeff=None,)
         assert dimension == 1
+        self.return_var_implemented = True
 
-    def next_cond_exp(self, y, delta_t, current_t):
-        next_y = y + self.drift * delta_t
+    def next_cond_exp(self, y, delta_t, current_t, variance=False):
+        if variance:
+            next_y = y + delta_t
+        else:
+            next_y = y + self.drift * delta_t
         return next_y
 
     def generate_paths(self, start_X=None):
