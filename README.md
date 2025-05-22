@@ -22,6 +22,8 @@ The experiments from the follow-up papers can be run with:
 - [Instructions for Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](#instructions-for-running-experiments-of-learning-chaotic-systems-and-long-term-predictions-with-neural-jump-odes)
 - [Instructions for Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](#instructions-for-running-experiments-of-nonparametric-filtering-estimation-and-classification-using-neural-jump-odes)
 
+A notebook studying Explainability in the context of NJODEs is available at [Explainability of NJODEs](https://gist.github.com/FlorianKrach/7a610cd88d9739b2f8bbda8455a558b4).
+
 
 ## Requirements
 
