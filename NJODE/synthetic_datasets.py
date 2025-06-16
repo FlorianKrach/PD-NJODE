@@ -1353,7 +1353,7 @@ class BMandQuantiles(BM):
                     Y_obs=torch.from_numpy(quantiles[i_obs]),
                     Y_obs_bj=torch.from_numpy(quantiles_bj[i_obs]),
                     n_obs_ot=torch.from_numpy(n_obs_ot[i_obs]),
-                    batch_size=batch_size, weight=weight).detach().numpy()
+                    batch_size=batch_size, weight=weight).detach().cpu().numpy()
             if return_path:
                 path_t.append(obs_time)
                 path_y.append(quantiles)
@@ -3232,7 +3232,7 @@ def compute_loss(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         Y_obs_bj=torch.from_numpy(Y_obs_bj),
         n_obs_ot=torch.from_numpy(n_obs_ot),
         batch_size=batch_size, eps=eps, weight=weight,
-        M_obs=M_obs).detach().numpy()
+        M_obs=M_obs).detach().cpu().numpy()
     return loss
 
 

@@ -228,7 +228,7 @@ def train(
         'other_model'   one of {'GRU_ODE_Bayes', randomizedNJODE};
                         the specifieed model is trained instead of the
                         controlled ODE-RNN model.
-                        Other options/inputs might change or loose their
+                        Other options/inputs might change or lose their
                         effect.
         'use_observation_as_input'  bool, whether to use the observations as
                         input to the model or whether to only use them for
@@ -253,7 +253,7 @@ def train(
                         evaluation (instead of the conditional expectation)
                         default: False
         'which_val_loss'   str, see models.LOSS_FUN_DICT for choices, which
-                        loss to use for evaluation, default: 'easy'
+                        loss to use for evaluation, default: 'very_easy'
         'input_coords'  list of int or None, which coordinates to use as
                         input. overwrites the setting from dataset_metadata.
                         if None, then all coordinates are used.
@@ -916,7 +916,7 @@ def train(
                     model.parameters(), clip_value=gradient_clip)
             optimizer.step()  # update weights by ADAM optimizer
             if ANOMALY_DETECTION:
-                print(r"current loss: {}".format(loss.detach().numpy()))
+                print(r"current loss: {}".format(loss.detach().cpu().numpy()))
             if DEBUG:
                 print("DEBUG MODE: stop training after first batch")
                 break
@@ -969,7 +969,7 @@ def train(
                         return_path=False, smoother=False,)
                 else:
                     raise ValueError
-                loss_val += c_loss.detach().numpy()
+                loss_val += c_loss.detach().cpu().numpy()
                 num_obs += 1  # count number of observations
 
                 # if functions are applied or var loss is computed, also compute
@@ -984,7 +984,7 @@ def train(
                             start_M=start_M, which_loss=which_val_loss,
                             dim_to=original_output_dim,
                             compute_variance_loss=False,)
-                    loss_val_corrected += c_loss_corrected.detach().numpy()
+                    loss_val_corrected += c_loss_corrected.detach().cpu().numpy()
 
             # mean squared difference evaluation
             if 'evaluate' in options and options['evaluate']:
@@ -999,7 +999,7 @@ def train(
             loss_val = loss_val / num_obs
             loss_val_corrected /= num_obs
             eval_msd = eval_msd / num_obs
-            train_loss = loss.detach().numpy()
+            train_loss = loss.detach().cpu().numpy()
             print_str = "epoch {}, weight={:.5f}, train-loss={:.5f}, " \
                         "optimal-val-loss={:.5f}, val-loss={:.5f}, ".format(
                 model.epoch, model.weight, train_loss, opt_val_loss, loss_val)
@@ -1114,13 +1114,13 @@ def compute_optimal_val_loss(
     for i, b in enumerate(dl_val):
         times = b["times"]
         time_ptr = b["time_ptr"]
-        X = b["X"].detach().numpy()
-        start_X = b["start_X"].detach().numpy()
-        obs_idx = b["obs_idx"].detach().numpy()
-        n_obs_ot = b["n_obs_ot"].detach().numpy()
+        X = b["X"].detach().cpu().numpy()
+        start_X = b["start_X"].detach().cpu().numpy()
+        obs_idx = b["obs_idx"].detach().cpu().numpy()
+        n_obs_ot = b["n_obs_ot"].detach().cpu().numpy()
         M = b["M"]
         if M is not None:
-            M = M.detach().numpy()
+            M = M.detach().cpu().numpy()
         num_obs += 1
         opt_loss += stockmodel.get_optimal_loss(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, n_obs_ot, M=M,
@@ -1415,9 +1415,9 @@ def plot_one_path_with_pred(
         times=times, time_ptr=time_ptr, X=X, obs_idx=obs_idx, delta_t=delta_t,
         T=T, start_X=start_X, M=M, start_M=start_M, n_obs_ot=n_obs_ot,
         which_loss=which_loss)
-    path_y_pred = res['pred'].detach().numpy()
+    path_y_pred = res['pred'].detach().cpu().numpy()
     path_t_pred = res['pred_t']
-    current_model_loss = res['loss'].detach().numpy()
+    current_model_loss = res['loss'].detach().cpu().numpy()
 
     # get variance path
     if plot_variance and (functions is not None) and ('power-2' in functions):
@@ -1429,7 +1429,7 @@ def plot_one_path_with_pred(
             path_var_pred = np.maximum(0, path_var_pred)
         path_std_pred = np.sqrt(path_var_pred)
     elif plot_variance and (model.compute_variance is not None):
-        path_var_pred = res["pred_var"].detach().numpy()
+        path_var_pred = res["pred_var"].detach().cpu().numpy()
         if model.compute_variance == "variance":
             path_var_pred = path_var_pred[:, :, 0:out_dim]**2
         elif model.compute_variance == "covariance":
@@ -1449,19 +1449,19 @@ def plot_one_path_with_pred(
     path_var_true = None
     if use_cond_exp:
         if M is not None:
-            M = M.detach().numpy()
+            M = M.detach().cpu().numpy()
         if (functions is not None and functions == ["power-2"] and
                 stockmodel.loss_comp_for_pow2_implemented):
-            X_ = X.detach().numpy()
-            start_X_ = start_X.detach().numpy()
+            X_ = X.detach().cpu().numpy()
+            start_X_ = start_X.detach().cpu().numpy()
         else:
-            X_ = X.detach().numpy()[:, :dim]
-            start_X_ = start_X.detach().numpy()[:, :dim]
+            X_ = X.detach().cpu().numpy()[:, :dim]
+            start_X_ = start_X.detach().cpu().numpy()[:, :dim]
             if M is not None:
                 M = M[:, :dim]
         res_sm = stockmodel.compute_cond_exp(
-            times, time_ptr, X_, obs_idx.detach().numpy(),
-            delta_t, T, start_X_, n_obs_ot.detach().numpy(),
+            times, time_ptr, X_, obs_idx.detach().cpu().numpy(),
+            delta_t, T, start_X_, n_obs_ot.detach().cpu().numpy(),
             return_path=True, get_loss=True, weight=model.weight,
             M=M, store_and_use_stored=reuse_cond_exp,
             return_var=(plot_variance and plot_true_var),
@@ -1478,8 +1478,8 @@ def plot_one_path_with_pred(
             add_model_ts = []
             for ref_model in plot_error_dist["additional_ref_models"]:
                 res_sm_add = stockmodel.compute_cond_exp(
-                    times, time_ptr, X_, obs_idx.detach().numpy(),
-                    delta_t, T, start_X_, n_obs_ot.detach().numpy(),
+                    times, time_ptr, X_, obs_idx.detach().cpu().numpy(),
+                    delta_t, T, start_X_, n_obs_ot.detach().cpu().numpy(),
                     return_path=True, get_loss=True, weight=model.weight,
                     M=M, store_and_use_stored=False,
                     return_var=plot_variance,

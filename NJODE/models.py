@@ -74,6 +74,7 @@ nonlinears = {  # dictionary of used non-linear activation functions. Reminder i
     'tanh': torch.nn.Tanh,
     'relu': torch.nn.ReLU,
     'prelu': torch.nn.PReLU,
+    'softmax': torch.nn.Softmax,
 }
 
 
@@ -90,9 +91,14 @@ def get_ffnn(input_size, output_size, nn_desc, dropout_rate, bias):
     :param bias: bool, whether a bias is used in the layers
     :return: torch.nn.Sequential, the NN function
     """
+    last_activation = None
+    if isinstance(nn_desc, (tuple, list)) and len(nn_desc) > 0 \
+            and isinstance(nn_desc[-1], str):
+        last_activation = nn_desc[-1]
+        nn_desc = nn_desc[:-1]  # remove last activation function from desc
     if nn_desc is not None and len(nn_desc) == 0:
         return torch.nn.Identity()
-    if nn_desc is None:
+    if nn_desc is None or nn_desc[0] == "linear":  # if no NN desc given, or only linear
         layers = [torch.nn.Linear(in_features=input_size, out_features=output_size, bias=bias)]  # take linear NN if
         # not specified otherwise
     else:
@@ -109,6 +115,8 @@ def get_ffnn(input_size, output_size, nn_desc, dropout_rate, bias):
         layers.append(torch.nn.Dropout(p=dropout_rate))  # add another dropout layer
         layers.append(torch.nn.Linear(in_features=nn_desc[-1][0], out_features=output_size, bias=bias))  # linear
         # output layer
+    if last_activation is not None:  # if a last activation function was specified, add it
+        layers.append(nonlinears[last_activation]())
     return torch.nn.Sequential(*layers)  # return the constructed NN
 
 
@@ -216,9 +224,9 @@ class LinReg(torch.nn.Module):
 
     def fit(self, X, y):
         if isinstance(X, torch.Tensor):
-            X = X.detach().numpy()
+            X = X.detach().cpu().numpy()
         if isinstance(y, torch.Tensor):
-            y = y.detach().numpy()
+            y = y.detach().cpu().numpy()
         X = np.concatenate([np.ones((X.shape[0],1)), X], axis=1)
         assert y.shape[1] == self.output_dim
         for i in range(self.output_dim):
@@ -1065,14 +1073,14 @@ class NJODE(torch.nn.Module):
 
         if true_paths is None:
             if M is not None:
-                M = M.detach().numpy()[:, :dim_to]
+                M = M.detach().cpu().numpy()[:, :dim_to]
             if X.shape[0] > 0:  # if no data (eg. bc. obs_perc=0, not possible)
-                X = X.detach().numpy()[:, :dim_to]
+                X = X.detach().cpu().numpy()[:, :dim_to]
             _, true_path_t, true_path_y = stockmodel.compute_cond_exp(
                 times, time_ptr, X,
-                obs_idx.detach().numpy(),
-                delta_t, T, start_X.detach().numpy()[:, :dim_to],
-                n_obs_ot.detach().numpy(),
+                obs_idx.detach().cpu().numpy(),
+                delta_t, T, start_X.detach().cpu().numpy()[:, :dim_to],
+                n_obs_ot.detach().cpu().numpy(),
                 return_path=True, get_loss=False, M=M,
                 store_and_use_stored=use_stored_cond_exp)
         else:
@@ -1087,10 +1095,10 @@ class NJODE(torch.nn.Module):
             true_path_y = np.transpose(true_path_y, axes=(2, 0, 1))
             true_path_t = true_t[which_t_ind]
 
-        if path_y.detach().numpy().shape == true_path_y.shape:
-            eval_metric = diff_fun(path_y.detach().numpy(), true_path_y)
+        if path_y.detach().cpu().numpy().shape == true_path_y.shape:
+            eval_metric = diff_fun(path_y.detach().cpu().numpy(), true_path_y)
         else:
-            print(path_y.detach().numpy().shape)
+            print(path_y.detach().cpu().numpy().shape)
             print(true_path_y.shape)
             raise ValueError("Shapes do not match!")
         if return_paths:
@@ -1154,7 +1162,7 @@ class NJODE(torch.nn.Module):
             start_M=None, dim_to=None, predict_labels=predict_labels,
             return_classifier_out=True)
 
-        path_y = path_y.detach().numpy()
+        path_y = path_y.detach().cpu().numpy()
         predicted_vals = np.zeros_like(true_predict_vals)
         for i in range(bs):
             t = predict_times[i][0]
@@ -1176,7 +1184,7 @@ class NJODE(torch.nn.Module):
         if true_samples is not None and true_predict_labels is not None:
             predicted_labels = np.zeros(bs)
             if cl_out is not None:
-                class_probs = self.SM(cl_out).detach().numpy()
+                class_probs = self.SM(cl_out).detach().cpu().numpy()
                 classes = np.argmax(class_probs, axis=1) - 1
                 f1_scores = sklearn.metrics.f1_score(
                     true_predict_labels[:, 0], classes,
@@ -1620,11 +1628,11 @@ class randomizedNJODE(torch.nn.Module):
             sig_at_last_obs = c_sig
 
             for ii, o in enumerate(i_obs.long()):
-                linreg_X.append(h_bj[o].detach().numpy())
-                linreg_X.append(h_aj[o].detach().numpy())
-                target = X_obs[ii, :dim_to].detach().numpy()
+                linreg_X.append(h_bj[o].detach().cpu().numpy())
+                linreg_X.append(h_aj[o].detach().cpu().numpy())
+                target = X_obs[ii, :dim_to].detach().cpu().numpy()
                 if self.masked:
-                    target[M_obs[ii, :dim_to].detach().numpy()==0] = np.nan
+                    target[M_obs[ii, :dim_to].detach().cpu().numpy()==0] = np.nan
                 linreg_y.append(target)
                 linreg_y.append(target)
 
@@ -1971,12 +1979,12 @@ class randomizedNJODE(torch.nn.Module):
 
         if true_paths is None:
             if M is not None:
-                M = M.detach().numpy()[:, :dim_to]
+                M = M.detach().cpu().numpy()[:, :dim_to]
             _, true_path_t, true_path_y = stockmodel.compute_cond_exp(
-                times, time_ptr, X.detach().numpy()[:, :dim_to],
-                obs_idx.detach().numpy(),
-                delta_t, T, start_X.detach().numpy()[:, :dim_to],
-                n_obs_ot.detach().numpy(),
+                times, time_ptr, X.detach().cpu().numpy()[:, :dim_to],
+                obs_idx.detach().cpu().numpy(),
+                delta_t, T, start_X.detach().cpu().numpy()[:, :dim_to],
+                n_obs_ot.detach().cpu().numpy(),
                 return_path=True, get_loss=False, M=M, )
         else:
             true_t = np.linspace(0, T, true_paths.shape[2])
@@ -1987,10 +1995,10 @@ class randomizedNJODE(torch.nn.Module):
             true_path_y = np.transpose(true_path_y, axes=(2, 0, 1))
             true_path_t = true_t[which_t_ind]
 
-        if path_y.detach().numpy().shape == true_path_y.shape:
-            eval_metric = diff_fun(path_y.detach().numpy(), true_path_y)
+        if path_y.detach().cpu().numpy().shape == true_path_y.shape:
+            eval_metric = diff_fun(path_y.detach().cpu().numpy(), true_path_y)
         else:
-            print(path_y.detach().numpy().shape)
+            print(path_y.detach().cpu().numpy().shape)
             print(true_path_y.shape)
             raise ValueError("Shapes do not match!")
         if return_paths:
@@ -2054,7 +2062,7 @@ class randomizedNJODE(torch.nn.Module):
             start_M=None, dim_to=None, predict_labels=predict_labels,
             return_classifier_out=True)
 
-        path_y = path_y.detach().numpy()
+        path_y = path_y.detach().cpu().numpy()
         predicted_vals = np.zeros_like(true_predict_vals)
         for i in range(bs):
             t = predict_times[i][0]
@@ -2076,7 +2084,7 @@ class randomizedNJODE(torch.nn.Module):
         if true_samples is not None and true_predict_labels is not None:
             predicted_labels = np.zeros(bs)
             if cl_out is not None:
-                class_probs = self.SM(cl_out).detach().numpy()
+                class_probs = self.SM(cl_out).detach().cpu().numpy()
                 classes = np.argmax(class_probs, axis=1) - 1
                 f1_scores = sklearn.metrics.f1_score(
                     true_predict_labels[:, 0], classes,
