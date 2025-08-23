@@ -988,7 +988,8 @@ class NJODE(torch.nn.Module):
                     delta_t_ = T - current_time
                 if self.solver == 'euler':
                     h, current_time = self.ode_step(
-                        h, delta_t_, current_time, last_X=last_X, tau=tau,
+                        h, delta_t_, current_time,
+                        last_X=last_X[:, self.input_coords], tau=tau,
                         signature=c_sig, current_y=self.readout_map(h))
                 else:
                     raise NotImplementedError
