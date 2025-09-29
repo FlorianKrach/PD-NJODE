@@ -370,7 +370,7 @@ def train(
         )
         makedirs(saved_models_path)
         if not os.path.exists(model_overview_file_name):
-            df_overview = pd.DataFrame(data=None, columns=['id', 'description'])
+            df_overview = pd.DataFrame(data=None, columns=['id', 'description'], dtype=object)
             max_id = 0
         else:
             df_overview = pd.read_csv(model_overview_file_name, index_col=0)
@@ -446,7 +446,7 @@ def train(
             resume_training = False
     if not resume_training:
         initial_print += '\ninitiate new model ...'
-        df_metric = pd.DataFrame(columns=metr_columns)
+        df_metric = pd.DataFrame(columns=metr_columns, dtype=object)
 
     # ---------- plot only option ------------
     stop = False
@@ -792,9 +792,10 @@ def train(
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
                 best_val_loss, loss_to_compare, model.epoch))
-            df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
-            df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
-            df_metric.to_csv(model_metric_file)
+            if len(metric_app) > 0:
+                df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
+                df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
+                df_metric.to_csv(model_metric_file)
             models.save_checkpoint(model, optimizer, model_path_save_last,
                                    model.epoch)
             models.save_checkpoint(model, optimizer, model_path_save_best,

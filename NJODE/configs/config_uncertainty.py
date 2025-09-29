@@ -61,13 +61,15 @@ overview_dict_physio_U = dict(
         ("min", "eval_metric_2",
          "eval_metric_2", "evaluation_mse_min"),
         ("min", "val_loss", "val_loss", "val_loss_min"),
+        ("last", "eval_metric_2",
+         "eval_metric_2", "evaluation_mse_last"),
     ),
     sortby=["evaluation_mse_min"],
 )
 
 eval_physio_U_dict = {
     'model_ids': list(range(1,26)), 'saved_models_path': physio_models_path_Unc,
-    'which': 'best', 'paths_to_plot': None,}
+    'which': 'last', 'paths_to_plot': None,}
 
 
 
@@ -116,7 +118,8 @@ param_dict_BMandVar = {
     'saved_models_path': [BM_models_path_Unc],
     'compute_variance': ['variance'],
     'var_weight': [10.],
-    'which_var_loss': [1,2,3],
+    'which_var_loss': [1,],
+    'input_var_t_helper': [True],
 }
 param_list_BMandVar_U = get_parameter_array(param_dict=param_dict_BMandVar)
 

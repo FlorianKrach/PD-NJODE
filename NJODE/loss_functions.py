@@ -12,10 +12,11 @@ import numpy as np
 import warnings
 
 # ==============================================================================
-def compute_var_loss(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
+def compute_var_loss(
+        X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, type=1):
+        Y_var_bj=None, Y_var=None, dim_to=None, type=1, **kwargs):
     if dim_to is None:
         dim_to = Y_obs.shape[1]
     if compute_variance == "variance":
@@ -30,17 +31,20 @@ def compute_var_loss(X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         d = int(np.sqrt(d2))
         Y_var_bj_v = Y_var_bj.view(-1, d, d)
         Y_var_bj_v = Y_var_bj_v[:, :dim_to, :dim_to]
-        Y_var_bj_v = torch.matmul(Y_var_bj_v.transpose(1, 2), Y_var_bj_v)
+        Y_var_bj_v = torch.matmul(Y_var_bj_v, Y_var_bj_v.transpose(1, 2))
         Y_var_v = Y_var.view(-1, d, d)
         Y_var_v = Y_var_v[:, :dim_to, :dim_to]
-        Y_var_v = torch.matmul(Y_var_v.transpose(1, 2), Y_var_v)
+        Y_var_v = torch.matmul(Y_var_v, Y_var_v.transpose(1, 2))
         # the following is a row vector for each batch sample
-        true_var_bj = (X_obs - Y_obs_bj.detach()).unsqueeze(1)
-        true_var = (X_obs - Y_obs.detach()).unsqueeze(1)
-        true_var_bj = torch.matmul(true_var_bj.transpose(1, 2), true_var_bj)
-        true_var = torch.matmul(true_var.transpose(1, 2), true_var)
-        M_obs_var = M_obs.unsqueeze(1)
-        M_obs_var = torch.matmul(M_obs_var.transpose(1, 2), M_obs_var)
+        true_var_bj = (X_obs - Y_obs_bj.detach()).unsqueeze(2)
+        true_var = (X_obs - Y_obs.detach()).unsqueeze(2)
+        true_var_bj = torch.matmul(true_var_bj, true_var_bj.transpose(1, 2))
+        true_var = torch.matmul(true_var, true_var.transpose(1, 2))
+        if M_obs == 1.:
+            M_obs_var = 1.
+        else:
+            M_obs_var = M_obs.unsqueeze(2)
+            M_obs_var = torch.matmul(M_obs_var, M_obs_var.transpose(1, 2))
         sum_dim = (1, 2)
     else:
         raise ValueError("compute_variance must be either 'variance' or "
@@ -86,7 +90,8 @@ def compute_loss(
         X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None):
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
     """
     loss function from the paper
     :param X_obs: torch.tensor, the true X values at the observations
@@ -154,7 +159,8 @@ def compute_loss_2(
         X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None):
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
     """
     similar to compute_loss, but using X_obs also in second part of loss
     instead of Y_obs -> should make the learning easier
@@ -187,7 +193,8 @@ def compute_loss_2_1(
         X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None):
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
     """
     similar to compute_loss, but using X_obs also in second part of loss
     instead of Y_obs and squaring the two terms directly instead of squaring the
@@ -219,7 +226,8 @@ def compute_loss_noisy_obs(
         X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None):
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
     """
     similar to compute_loss, but only using the 2nd term of the original loss
     function, which enables training with noisy observations
@@ -249,7 +257,8 @@ def compute_loss_3(
         X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
         weight=0.5, M_obs=None,
         compute_variance=None, var_weight=1.,
-        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None):
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
     """
     loss function with 1-norm instead of 2-norm for the two terms
     intuitively this should lead to the conditional median instead of mean (not
@@ -443,6 +452,206 @@ def compute_quantile_jump_loss(quantiles):
     return loss
 
 
+def compute_loss_vola(
+        X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
+        weight=0.5, M_obs=None,
+        compute_variance=None, var_weight=1.,
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None, version=1,
+        **kwargs):
+    """
+    loss function for learning the vola estimate of an Ito process for usage in
+    a generative model.
+    in particular, X_obs is assumed to be the left-limit of the Z process
+
+    X_obs = Z_minus
+    Z_minus = (X_t - X_tau)^2
+
+    -> the loss trains the model to replicate Z_minus before the jump (with
+    Y_obs_bj) and to jump to 0 (with Y_obs), which is the value of Z_plus at an
+    observation.
+
+    the loss supports 3 versions:
+    - 0: original (easy) loss function style (joint squaring of two loss terms)
+    - 1: IO loss function style (individual squaring of two loss terms)
+    - 2: noise-adapted loss function style (no direct penalization after jump).
+        this is used by compute_loss_vola_lim (see description there).
+    default: version 1
+    """
+    if M_obs is None:
+        M_obs = 1.
+
+    d2 = Y_obs_bj.shape[1]
+    d = int(np.sqrt(d2))
+    Y_obs_bj_mat = Y_obs_bj.view(-1, d, d)
+    Y_obs_bj_mat1 = torch.matmul(Y_obs_bj_mat, Y_obs_bj_mat.transpose(1, 2))
+    Y_obs_bj_mod = Y_obs_bj_mat1.view(-1, d2)
+
+    d2 = Y_obs.shape[1]
+    d = int(np.sqrt(d2))
+    Y_obs_mat = Y_obs.view(-1, d, d)
+    Y_obs_mat1 = torch.matmul(Y_obs_mat, Y_obs_mat.transpose(1, 2))
+    Y_obs_mod = Y_obs_mat1.view(-1, d2)
+
+    if version == 0:  # style: original (easy) loss function (joint squaring)
+      inner = (2*weight * torch.sqrt(
+        torch.sum(M_obs * (Y_obs_bj_mod - X_obs) ** 2, dim=1) + eps) +
+              2*(1 - weight) * torch.sqrt(
+                torch.sum(M_obs * (Y_obs_mod) ** 2, dim=1)
+                + eps)) ** 2
+    elif version == 1:  # style: IO loss function (individual squaring)
+        inner = (2*weight*torch.sum(M_obs * (Y_obs_bj_mod - X_obs) ** 2, dim=1)+
+              2*(1 - weight) * torch.sum(M_obs * (Y_obs_mod) ** 2, dim=1))
+    elif version == 2:  # style: noise-adapted loss function
+        inner = torch.sum(M_obs * (Y_obs_bj_mod - X_obs) ** 2, dim=1)
+    else:
+        raise ValueError("version must be in {0, 1, 2}")
+
+    outer = torch.sum(inner / n_obs_ot)
+
+    return outer / batch_size
+
+
+def compute_loss_vola_lim(
+        X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
+        weight=0.5, M_obs=None,
+        compute_variance=None, var_weight=1.,
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
+    """
+    loss function for learning the vola estimate of an Ito process for usage in
+    a generative model.
+    in particular, X_obs is assumed to be the left-limit of the Z process devided
+    by the time difference since last observation.
+
+    X_obs = Z_minus/tdiff
+    Z_minus = (X_t - X_tau)^2
+    tdiff = t - tau
+
+    -> the loss trains the model to replicate Z_minus before the jump (with
+    Y_obs_bj) and does not penalize the jump directly. with suitable training
+    data, this forces the model to jump to the right-limit of Z_minus/tdiff for
+    tdiff->0, which is the instantaneous vola coefficient (if necessary
+    information available, otherwise its best estimate).
+
+    BIAS CORRECTION:
+    the loss also supports the case where a bias-corrected version of Z_minus is
+    used instead of Z_minus, i.e., Z_minus is replaced by
+    Z_minus_biascorrected = (X_t - X_tau - E[X_t - X_tau | X_tau])^2 =
+        = (X_t - E[X_t | X_tau])^2.
+    in this case, the theoretical right-limit is still the instantaneous vola
+    coefficient. since the values of Z_minus_biascorrected have a smaller
+    magnitude, this can improve the accuracy of the model's estimates.
+    """
+
+    return compute_loss_vola(
+        X_obs=X_obs, Y_obs=Y_obs, Y_obs_bj=Y_obs_bj, n_obs_ot=n_obs_ot,
+        batch_size=batch_size, eps=eps,
+        weight=weight, M_obs=M_obs,
+        compute_variance=compute_variance, var_weight=var_weight,
+        Y_var_bj=Y_var_bj, Y_var=Y_var, dim_to=dim_to,
+        which_var_loss=which_var_loss, version=2)
+
+
+def compute_loss_drift_lim(
+        X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
+        weight=0.5, M_obs=None,
+        compute_variance=None, var_weight=1.,
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
+    """
+    loss function for learning the drift estimate of an Ito process for usage in
+    a generative model.
+    in particular, X_obs needs to be the increment process, i.e., the current
+    (left-limit of the) increment since the last observation, divided by the
+    time difference since last observation.
+
+    X_obs = (X_t - X_tau)/tdiff
+    tdiff = t - tau
+
+    -> the loss trains the model to replicate X_obs before the jump (with
+    Y_obs_bj) and does not penalize the jump directly. with suitable training
+    data, this forces the model to jump to the right-limit of X_obs for
+    tdiff->0, which is the instantaneous drift coefficient (if necessary
+    information available, otherwise its best estimate).
+    """
+
+    return compute_loss_noisy_obs(
+        X_obs=X_obs, Y_obs=Y_obs, Y_obs_bj=Y_obs_bj, n_obs_ot=n_obs_ot,
+        batch_size=batch_size, eps=eps,
+        weight=weight, M_obs=M_obs,
+        compute_variance=compute_variance, var_weight=var_weight,
+        Y_var_bj=Y_var_bj, Y_var=Y_var, dim_to=dim_to,
+        which_var_loss=which_var_loss,)
+
+
+def compute_loss_gen_coeffs(
+        X_obs, Y_obs, Y_obs_bj, n_obs_ot, batch_size, eps=1e-10,
+        weight=0.5, M_obs=None,
+        compute_variance=None, var_weight=1., tdiff=None,
+        Y_var_bj=None, Y_var=None, dim_to=None, which_var_loss=None,
+        **kwargs):
+    """
+    compute the loss for retrieving the coefficients of an Ito process for usage
+    in a generative model.
+    in particular, X_obs needs to be the increment process, i.e., the current
+    (left-limit of the) increment since the last observation, divided by the
+    time difference since last observation.
+
+    X_obs = (X_t - X_tau)/tdiff
+    tdiff = t - tau
+
+    the loss has two components:
+
+    1) | X_obs - Y_obs_bj |^2
+      -> training Y_obs to approximate the drift
+    2) | tdiff * (X_obs - Y_obs_bj.detach())^2 - Y_var_bj |^2
+      -> trainineg Y_var to approximate the volatility; detach Y_obs s.t. it
+         acts like a constant, i.e., like the value of the conditional
+         expactation of X_obs (if Y_obs is trained well enough), but doesn't
+         trigger backprop through it. we have to multiply by tdiff, because
+         (after squaring) X_obs and Y_obs include a division by tdiff^2, while
+         the vola estimate is only divided by tdiff.
+         subtracting Y_obs_bj.detach() acts like a bias correction through the
+         model's estimates itself (compare with compute_loss_vola_lim -> BIAS
+         CORRECTION for more info).
+
+    training both components with the noisy obs type loss, the model is forced
+    (indirectly) to jump to the correct instantaneous drift and volatility
+    values (if necessary information available, otherwise their best estimates),
+    since those are the right-limits of the respective increment processes.
+    (also see compute_loss_vola_lim).
+    """
+    if M_obs is None:
+        M_obs = 1.
+        M_obs_vol = 1.
+    else:
+        M_obs_vol = torch.matmul(M_obs.unsqueeze(2), M_obs.unsqueeze(1))
+        M_obs_vol = M_obs_vol.view(-1, M_obs.shape[1] ** 2)
+
+    tdiff = torch.from_numpy(tdiff).to(X_obs.device).reshape(-1, 1).repeat(
+        1, X_obs.shape[1])
+
+    d2 = Y_var_bj.shape[1]
+    d = int(np.sqrt(d2))
+    Y_var_bj_mat = Y_var_bj.view(-1, d, d)
+    Y_var_bj_mat1 = torch.matmul(Y_var_bj_mat, Y_var_bj_mat.transpose(1, 2))
+    Y_var_bj_mod = Y_var_bj_mat1.view(-1, d2)
+
+    vol_target1 = torch.sqrt(tdiff) * (X_obs - Y_obs_bj.detach())
+    vol_target = torch.matmul(vol_target1.unsqueeze(2),vol_target1.unsqueeze(1))
+    vol_target_mod = vol_target.view(-1, d2)
+
+    # part 1: drift
+    inner1 = torch.sum(M_obs * (Y_obs_bj - X_obs) ** 2, dim=1)
+    # part 2: volatility
+    inner2 = var_weight * torch.sum(
+        M_obs_vol * (Y_var_bj_mod - vol_target_mod) ** 2, dim=1)
+    inner = inner1 + inner2
+    outer = torch.sum(inner / n_obs_ot)
+
+    return outer / batch_size
+
+
 
 
 LOSS_FUN_DICT = {
@@ -456,6 +665,10 @@ LOSS_FUN_DICT = {
     'noisy_obs': compute_loss_noisy_obs,
     'abs': compute_loss_3,
     'jump': compute_jump_loss,
+    'vola': compute_loss_vola,
+    'vola_lim': compute_loss_vola_lim,
+    'drift_lim': compute_loss_drift_lim,
+    'gen_coeffs': compute_loss_gen_coeffs,
 
     # Quantile loss functions, based on the quantile regression loss.
     #   They are called with the quantiles and return the corresponding

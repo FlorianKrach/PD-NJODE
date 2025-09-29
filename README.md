@@ -7,6 +7,7 @@ This repository is the official implementation of the papers
 - [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
 - [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
 - [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271)
+- [Neural Jump ODEs as Generative Models](?)
 
 which are part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -21,8 +22,12 @@ The experiments from the follow-up papers can be run with:
 - [Instructions for Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](#instructions-for-running-experiments-of-extending-path-dependent-nj-odes-to-noisy-observations-and-a-dependent-observation-framework)
 - [Instructions for Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](#instructions-for-running-experiments-of-learning-chaotic-systems-and-long-term-predictions-with-neural-jump-odes)
 - [Instructions for Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](#instructions-for-running-experiments-of-nonparametric-filtering-estimation-and-classification-using-neural-jump-odes)
+- [Instructions for Running Experiments of Generative NJODE](#instructions-for-running-experiments-of-generative-njode)
 
 A notebook studying Explainability in the context of NJODEs is available at [Explainability of NJODEs](https://gist.github.com/FlorianKrach/7a610cd88d9739b2f8bbda8455a558b4).
+
+A notebook comparing different coefficient estimation approach using the NJODE for a generative model is available at [Generative NJODE notebook](https://gist.github.com/FlorianKrach/d28a3d28e875e0cadf163b78f75028e1).
+
 
 
 ## Requirements
@@ -115,6 +120,8 @@ please cite our papers:
         url={https://openreview.net/forum?id=JFKR3WqwyXR}
     }
     ```
+  
+
 
 
 
@@ -454,6 +461,7 @@ since the network output $W$ corresponds to the standard deviation, which is squ
 By the theoretical results, the model output $W$ or $V$, respectively, learns to approximate the conditional expectation of $(X-Y)^2$ arbitrarily well, which coincides with the conditional variance of $X$.  
 See the [NJODE website](https://floriankrach.github.io/njode/index.html) for more details.
 
+
 Parameters defined in [config_uncertainty.py](NJODE/configs/config_uncertainty.py).
 
 
@@ -475,6 +483,74 @@ python run.py --params=param_list_BMandVar_U --NB_JOBS=25 --NB_CPUS=1 --first_id
 
 
 
+
+
+--------------------------------------------------------------------------------
+# Instructions for Running Experiments of Generative NJODE
+The code for the experiments of the paper [Neural Jump ODE as Generative Model](?).
+
+The configs for these experiments are in [config_GenNJODE.py](NJODE/configs/config_GenNJODE.py).
+
+
+## Dataset Generation
+go to the source directory:
+```sh
+cd NJODE
+```
+
+generate Geometric Brownian Motion (GBM) datasets:
+```shell
+python data_utils.py --dataset_params=GBM_joint_training_dict --seed=0
+python data_utils.py --dataset_params=GBM_drift_lim_training_dict --seed=0
+python data_utils.py --dataset_params=GBM_vol_lim_training_dict --seed=0
+python data_utils.py --dataset_params=GBM_drift_training_dict --seed=0
+python data_utils.py --dataset_params=GBM_vol_training_dict --seed=0
+
+python data_utils.py --dataset_params=GBM_joint_training_dict2 --seed=0
+```
+
+generate Ornstein-Uhlenbeck (OU) dataset:
+```shell
+python data_utils.py --dataset_params=OU_joint_training_dict --seed=0
+```
+
+
+## Training
+train NJODE on GBM datasets:
+```shell
+python run.py --params=param_list_GenNJODE_GBM --NB_JOBS=10 --NB_CPUS=1 --first_id=1 --get_overview=overview_dict_GBM_genNJODE
+```
+
+train NJODE on OU datasets:
+```shell
+python run.py --params=param_list_GenNJODE_OU --NB_JOBS=1 --NB_CPUS=1 --first_id=1
+```
+
+
+## Generation of paths
+generate paths with trained models for GBM:
+```shell
+# joint instantaneous coedfficient estimation
+python generate.py --params=generation_dict_GBM1_1 --NB_CPUS=1 --USE_GPU=False
+python generate.py --params=generation_dict_GBM1_2 --NB_CPUS=1 --USE_GPU=False
+python generate.py --params=generation_dict_GBM1_3 --NB_CPUS=1 --USE_GPU=False
+python generate.py --params=generation_dict_GBM1_4 --NB_CPUS=1 --USE_GPU=False
+
+# joint baseline coefficient estimation
+python generate.py --params=generation_dict_GBM2_1 --NB_CPUS=1 --USE_GPU=False
+
+# individual instantaneous coefficient estimation
+python generate.py --params=generation_dict_GBM3_2 --NB_CPUS=1 --USE_GPU=False
+
+# individual baseline coefficient estimation
+python generate.py --params=generation_dict_GBM4_1 --NB_CPUS=1 --USE_GPU=False
+```
+
+generate paths with trained models for OU:
+```shell
+# joint instantaneous coedfficient estimation
+python generate.py --params=generation_dict_OU1_2 --NB_CPUS=1 --USE_GPU=False
+```
 
 
 --------------------------------------------------------------------------------

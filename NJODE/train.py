@@ -101,7 +101,7 @@ def train(
         dataset='BlackScholes', dataset_id=None, data_dict=None,
         plot=True, paths_to_plot=(0,),
         saved_models_path=saved_models_path,
-        DEBUG=0,
+        DEBUG=0, train_seed=None, save_best_from_epoch=0,
         **options
 ):
 
@@ -156,6 +156,9 @@ def train(
             plotted
     :param saved_models_path: str, where to save the models
     :param DEBUG: int, if >0, then the model is in debug mode
+    :param train_seed: int, seed for the training
+    :param save_best_from_epoch: int, if >0, the model is only saved as best if
+        it is from an epoch >= save_best_from_epoch
     :param options: kwargs, used keywords:
         'test_data_dict'    None, str or dict, if no None, this data_dict is
                         used to define the dataset for plot_only and
@@ -253,7 +256,8 @@ def train(
                         evaluation (instead of the conditional expectation)
                         default: False
         'which_val_loss'   str, see models.LOSS_FUN_DICT for choices, which
-                        loss to use for evaluation, default: 'very_easy'
+                        loss to use for evaluation, default: same as which_loss
+                        if provided, otherwise 'very_easy'
         'input_coords'  list of int or None, which coordinates to use as
                         input. overwrites the setting from dataset_metadata.
                         if None, then all coordinates are used.
@@ -265,18 +269,23 @@ def train(
                         signature coordinates. overwrites the setting from
                         dataset_metadata. if None, then all input
                         coordinates are used.
-        'compute_variance'   None, bool or str, if None, then no variance
-                        computation is done. if bool, then the (marginal)
-                        variance is computed. if str "covariance", then the
-                        covariance matrix is computed. ATTENTION: the model
-                        output corresponds to the square root of the
-                        variance (or the Cholesky decomposition of the
-                        covariance matrix, respectivel), so if W is the
-                        model's output corresponding to the variance, then
-                        the models variance estimate is V=W^T*W or W^2,
-                        depending whether the covariance or marginal
-                        variance is estimated.
+        'compute_variance'   None, bool or str,
+                        - if None/False, then no variance computation is done.
+                        - if True, then the (marginal) variance is computed.
+                        - if str in {"covariance", "covar"}, then the covariance
+                          matrix is computed.
+                        - if str in {"vola", "volatility"}, then the volatility
+                          matrix is computed (always in matrix style, similarly
+                          to the covariance).
                         default: None
+                        ATTENTION:
+                          the model output corresponds to the square root of the
+                          variance (or the Cholesky decomposition of the
+                          covariance matrix, respectivel), so if W is the
+                          model's output corresponding to the variance, then
+                          the models variance estimate is V=W^T*W or W^2,
+                          depending whether the covariance or marginal
+                          variance is estimated.
         'var_weight'    float, weight of the variance loss term in the loss
                         function, default: 1
         'input_var_t_helper'    bool, whether to use 1/sqrt(Delta_t) as
@@ -288,6 +297,11 @@ def train(
                         of the main loss function (which aligns with structure
                         of main loss function as far as reasonable). see
                         models.LOSS_FUN_DICT for choices (currently in {1,2,3}).
+        'square_model_output'  bool, whether to use the squared model output
+                        in the plots. use for plotting square of vola model
+                        output.
+        'plot_vola'     bool, whether to plot the vola model output, if it is
+                        computed via compute_variance="vola"
         'plot_only_evaluate' bool, whether to evaluate the model when in
                         plot_only mode
         'plot_error_dist'   None or dict, if not None, then the kwargs for
@@ -359,6 +373,9 @@ def train(
         np.random.seed(0)
         # set seed and deterministic to make reproducible
         cudnn.deterministic = True
+    if train_seed is not None:
+        torch.manual_seed(train_seed)
+        np.random.seed(train_seed)
 
     # set number of CPUs
     torch.set_num_threads(N_CPUS)
@@ -473,17 +490,29 @@ def train(
 
     # get variance or covariance coordinates if wanted
     compute_variance = None
+    var_weight, which_var_loss = 1., None
+    if 'var_weight' in options:
+        var_weight = options['var_weight']
+    if 'which_var_loss' in options:
+        which_var_loss = options['which_var_loss']
     var_size = 0
+    return_var = False
     if 'compute_variance' in options:
+        return_var = True
         if functions is not None:
             warnings.warn(
                 "function application to X and concurrent variance/covariance "
                 "computation might lead to problems! Use carefully!",
                 UserWarning)
         compute_variance = options['compute_variance']
-        if compute_variance == 'covariance':
-            var_size = output_size**2
+        if compute_variance in ['covariance', 'covar']:
+            compute_variance = "covariance"
+            var_size = output_size ** 2
             initial_print += '\ncompute covariance of size {}'.format(var_size)
+        elif compute_variance in ['vola', 'volatility']:
+            compute_variance = "volatility"
+            var_size = output_size ** 2
+            initial_print += '\ncompute volatility of size {}'.format(var_size)
         elif compute_variance not in [None, False]:
             compute_variance = 'variance'
             var_size = output_size
@@ -493,8 +522,10 @@ def train(
             compute_variance = None
             initial_print += '\nno variance computation'
             var_size = 0
+            return_var = False
         # the models variance output is the Cholesky decomposition of the
-        #   covariance matrix or the square root of the marginal variance.
+        #   covariance or volatility matrix or the square root of the marginal
+        #   variance.
         # for Y being the entire model output, the variance output is
         #   W=Y[:,-var_size:]
         output_size += var_size
@@ -548,6 +579,12 @@ def train(
     plot_obs_prob = False
     if 'plot_obs_prob' in options:
         plot_obs_prob = options["plot_obs_prob"]
+    square_model_output = False
+    if 'square_model_output' in options:
+        square_model_output = options['square_model_output']
+    plot_vola = False
+    if 'plot_vola' in options:
+        plot_vola = options['plot_vola']
 
     # validation loss function
     which_val_loss = 'very_easy'
@@ -567,7 +604,8 @@ def train(
     if 'plot_only' in options:
         plot_only = options['plot_only']
     if use_cond_exp and not plot_only:
-        if compute_variance is not None:
+        if (compute_variance is not None and not
+                stockmodel.return_var_implemented):
             warnings.warn(
                 "optimal loss might be wrong, since the conditional "
                 "variance is also learned, which is not accounted for in "
@@ -592,8 +630,10 @@ def train(
                 corrected_string = ""
             opt_val_loss = compute_optimal_val_loss(
                 dl_val, stockmodel, delta_t, T, mult=mult,
-                store_cond_exp=store_cond_exp, return_var=False,
-                which_loss=which_val_loss)
+                store_cond_exp=store_cond_exp, return_var=return_var,
+                which_loss=which_val_loss,
+                compute_variance=compute_variance, var_weight=var_weight,
+                which_var_loss=which_var_loss, )
         initial_print += '\noptimal {}val-loss (achieved by true cond exp): ' \
                      '{:.5f}'.format(corrected_string, opt_val_loss)
     else:
@@ -629,7 +669,8 @@ def train(
         )
         makedirs(saved_models_path)
         if not os.path.exists(model_overview_file_name):
-            df_overview = pd.DataFrame(data=None, columns=['id', 'description'])
+            df_overview = pd.DataFrame(
+                data=None, columns=['id', 'description'], dtype=object)
             max_id = 0
         else:
             df_overview = pd.read_csv(model_overview_file_name, index_col=0)  # read model overview csv file
@@ -763,7 +804,7 @@ def train(
             resume_training = False
     if not resume_training:
         initial_print += '\ninitiate new model ...'
-        df_metric = pd.DataFrame(columns=metr_columns)
+        df_metric = pd.DataFrame(columns=metr_columns, dtype=object)
 
     # ---------- plot only option ------------
     if plot_only:
@@ -784,7 +825,7 @@ def train(
             testset_metadata['dt'], testset_metadata['maturity'],
             path_to_plot=paths_to_plot, save_path=plot_save_path,
             filename=plot_filename, plot_variance=plot_variance,
-            plot_true_var=plot_true_var,
+            plot_true_var=return_var,
             functions=functions, std_factor=std_factor,
             use_cond_exp=use_cond_exp, output_coords=output_coords,
             model_name=model_name, save_extras=save_extras, ylabels=ylabels,
@@ -792,7 +833,9 @@ def train(
             same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
             dataset_metadata=testset_metadata, reuse_cond_exp=True,
             loss_quantiles=loss_quantiles, which_loss=which_val_loss,
-            plot_error_dist=plot_error_dist, ref_model_to_use=ref_model_to_use)
+            plot_error_dist=plot_error_dist, ref_model_to_use=ref_model_to_use,
+            square_model_output=square_model_output, plot_vola=plot_vola,
+            var_weight=var_weight, which_var_loss=which_var_loss,)
         eval_msd = None
         if "plot_only_evaluate" in options and options["plot_only_evaluate"]:
             print("evaluate model ...")
@@ -976,7 +1019,8 @@ def train(
                 #   the loss when only using the coordinates where function was
                 #   not applied & without computing the variance loss
                 #   -> this can be compared to the optimal-eval-loss
-                if (mult is not None and mult > 1) or (compute_variance is not None):
+                if (mult is not None and mult > 1) or (compute_variance is
+                        not None and not stockmodel.return_var_implemented):
                     if 'other_model' not in options:
                         hT_corrected, c_loss_corrected = model(
                             times, time_ptr, X, obs_idx, delta_t, T, start_X,
@@ -1013,8 +1057,12 @@ def train(
                                loss_val, opt_val_loss, None, None]
         if 'evaluate' in options and options['evaluate']:
             curr_metric.append(eval_msd)
-            print("evaluation mean square difference (test set): {:.5f}".format(
-                eval_msd))
+            if isinstance(eval_msd, float):
+                eval_msd = [eval_msd]
+            prstr = "evaluation mean square difference (test set): "
+            for i in range(len(eval_msd)):
+                prstr += "{:.5f}, ".format(eval_msd[i])
+            print(prstr)
         else:
             curr_metric.append(None)
         metric_app.append(curr_metric)
@@ -1039,7 +1087,10 @@ def train(
                     output_coords=output_coords, input_coords=input_coords,
                     same_yaxis=plot_same_yaxis, plot_obs_prob=plot_obs_prob,
                     dataset_metadata=dataset_metadata,
-                    loss_quantiles=loss_quantiles, which_loss=which_val_loss)
+                    loss_quantiles=loss_quantiles, which_loss=which_val_loss,
+                    square_model_output=square_model_output,
+                    plot_vola=plot_vola,
+                    var_weight=var_weight, which_var_loss=which_var_loss,)
                 print('optimal test-loss (with current weight={:.5f}): '
                       '{:.5f}'.format(model.weight, curr_opt_test_loss))
                 print('model test-loss (with current weight={:.5f}): '
@@ -1054,13 +1105,14 @@ def train(
                                    model.epoch)
             metric_app = []
             print('saved!')
-        if loss_val < best_val_loss:
+        if loss_val < best_val_loss and model.epoch >= save_best_from_epoch:
             print('save new best model: last-best-loss: {:.5f}, '
                   'new-best-loss: {:.5f}, epoch: {}'.format(
                 best_val_loss, loss_val, model.epoch))
-            df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
-            df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
-            df_metric.to_csv(model_metric_file)
+            if len(metric_app) > 0:
+                df_m_app = pd.DataFrame(data=metric_app, columns=metr_columns)
+                df_metric = pd.concat([df_metric, df_m_app], ignore_index=True)
+                df_metric.to_csv(model_metric_file)
             models.save_checkpoint(model, optimizer, model_path_save_last,
                                    model.epoch)
             models.save_checkpoint(model, optimizer, model_path_save_best,
@@ -1096,8 +1148,10 @@ def train(
 
 
 def compute_optimal_val_loss(
-        dl_val, stockmodel, delta_t, T, mult=None,
-        store_cond_exp=False, return_var=False, which_loss='easy'):
+    dl_val, stockmodel, delta_t, T, mult=None,
+    store_cond_exp=False, return_var=False, which_loss='easy',
+    compute_variance=None, var_weight=1.,
+    which_var_loss=None,):
     """
     compute optimal evaluation loss (with the true cond. exp.) on the
     test-dataset
@@ -1125,7 +1179,9 @@ def compute_optimal_val_loss(
         opt_loss += stockmodel.get_optimal_loss(
             times, time_ptr, X, obs_idx, delta_t, T, start_X, n_obs_ot, M=M,
             mult=mult, store_and_use_stored=store_cond_exp,
-            return_var=return_var, which_loss=which_loss)
+            return_var=return_var, which_loss=which_loss,
+            compute_variance=compute_variance, var_weight=var_weight,
+            which_var_loss=which_var_loss,)
     return opt_loss / num_obs
 
 
@@ -1317,6 +1373,8 @@ def plot_one_path_with_pred(
         loss_quantiles=None, input_coords=None,
         which_loss='easy',
         plot_error_dist=None, ref_model_to_use=None,
+        square_model_output=False, plot_vola=False,
+        var_weight=1., which_var_loss=None,
 ):
     """
     plot one path of the stockmodel together with optimal cond. exp. and its
@@ -1335,7 +1393,8 @@ def plot_one_path_with_pred(
             possibility to put the path number
     :param plot_variance: bool, whether to plot the variance, if supported by
             functions (i.e. square has to be applied)
-    :param plot_true_var: bool, whether to plot the true variance
+    :param plot_true_var: bool, whether to compute the true variance (and plot
+        it if either plot_variance or plot_vola are True)
     :param functions: list of functions (as str), the functions applied to X
     :param std_factor: float, the factor by which std is multiplied
     :param model_name: str or None, name used for model in plots
@@ -1366,6 +1425,11 @@ def plot_one_path_with_pred(
     :param ref_model_to_use: None or str, the reference models to use in the
         plots, None uses the standard reference model, usually the conditional
         expectation
+    :param square_model_output: bool, whether to plot the squared model output
+        (used for vola prediction)
+    :param plot_vola: bool, whether to plot the vola prediction
+    :param var_weight: float, the weight to use for the variance loss
+    :param which_var_loss: str, the loss function to use for the variance
 
     :return: optimal loss
     """
@@ -1416,6 +1480,8 @@ def plot_one_path_with_pred(
         T=T, start_X=start_X, M=M, start_M=start_M, n_obs_ot=n_obs_ot,
         which_loss=which_loss)
     path_y_pred = res['pred'].detach().cpu().numpy()
+    if square_model_output:
+        path_y_pred = path_y_pred ** 2
     path_t_pred = res['pred_t']
     current_model_loss = res['loss'].detach().cpu().numpy()
 
@@ -1428,18 +1494,27 @@ def plot_one_path_with_pred(
             print('WARNING: some predicted cond. variances below 0 -> clip')
             path_var_pred = np.maximum(0, path_var_pred)
         path_std_pred = np.sqrt(path_var_pred)
-    elif plot_variance and (model.compute_variance is not None):
-        path_var_pred = res["pred_var"].detach().cpu().numpy()
+    elif (plot_variance or plot_vola) and (model.compute_variance is not None):
+        path_var_pred = res["pred_var"].detach().numpy()
         if model.compute_variance == "variance":
-            path_var_pred = path_var_pred[:, :, 0:out_dim]**2
+            path_var_pred = path_var_pred[:, :, 0:out_dim] ** 2
         elif model.compute_variance == "covariance":
             d = int(np.sqrt(path_var_pred.shape[2]))
             path_var_pred = path_var_pred.reshape(
                 path_y_pred.shape[0], path_y_pred.shape[1], d, d)
             path_var_pred = np.matmul(
-                path_var_pred.transpose(0,1,3,2), path_var_pred)
+                path_var_pred.transpose(0, 1, 3, 2), path_var_pred)
             path_var_pred = np.diagonal(path_var_pred, axis1=2, axis2=3)
             path_var_pred = path_var_pred[:, :, 0:out_dim]
+        elif model.compute_variance == "volatility":
+            d = int(np.sqrt(path_var_pred.shape[2]))
+            path_var_pred = path_var_pred.reshape(
+                path_y_pred.shape[0], path_y_pred.shape[1], d, d)
+            path_var_pred = np.matmul(
+                path_var_pred.transpose(0, 1, 3, 2), path_var_pred)
+            path_var_pred = path_var_pred[:, :, 0:out_dim, 0:out_dim]
+            path_var_pred = path_var_pred.reshape(
+                path_y_pred.shape[0], path_y_pred.shape[1], -1)
         else:
             raise ValueError("compute_variance {} not implemented".format(
                 model.compute_variance))
@@ -1464,11 +1539,25 @@ def plot_one_path_with_pred(
             delta_t, T, start_X_, n_obs_ot.detach().cpu().numpy(),
             return_path=True, get_loss=True, weight=model.weight,
             M=M, store_and_use_stored=reuse_cond_exp,
-            return_var=(plot_variance and plot_true_var),
-            which_loss=which_loss, ref_model=ref_model_to_use)
+            return_var=plot_true_var,
+            which_loss=which_loss, ref_model=ref_model_to_use,
+            compute_variance=model.compute_variance, var_weight=var_weight,
+            which_var_loss=which_var_loss,)
         opt_loss, path_t_true, path_y_true = res_sm[:3]
-        if plot_variance and len(res_sm) > 3:
+        if square_model_output:
+            path_y_true = path_y_true ** 2
+        if plot_true_var and len(res_sm) > 3:
             path_var_true = res_sm[3]
+            if model.compute_variance == "volatility":
+                d = int(np.sqrt(path_var_true.shape[2]))
+                path_var_true = path_var_true.reshape(
+                    path_var_true.shape[0], path_var_true.shape[1], d, d)
+                path_var_true = np.matmul(
+                    path_var_true.transpose(0, 1, 3, 2), path_var_true)
+                path_var_true = path_var_true.reshape(
+                    path_var_true.shape[0], path_var_true.shape[1], -1)
+        else:
+            plot_true_var = False
 
         # get additional reference model predictions for error distribution
         #   plots
@@ -1518,8 +1607,11 @@ def plot_one_path_with_pred(
             coord_names=ylabels)
 
     for i in path_to_plot:
-        fig, axs = plt.subplots(dim, sharex=True)
-        if dim == 1:
+        nb_subplots = dim
+        if plot_vola:
+            nb_subplots += model.var_size
+        fig, axs = plt.subplots(nb_subplots, sharex=True)
+        if nb_subplots == 1:
             axs = [axs]
         outcoord_ind = -1
         unobserved_coord = False
@@ -1550,12 +1642,11 @@ def plot_one_path_with_pred(
             lab1 = legendlabels[1] if legendlabels is not None else model_name
             lab2 = legendlabels[2] if legendlabels is not None \
                 else 'true conditional expectation'
-            lab3 = legendlabels[3] if legendlabels is not None else 'observed'
 
-            axs[j].plot(path_t_true_X, true_X[i, j, :], label=lab0,
-                        color=colors[0])
+            axs[j].plot(path_t_true_X, true_X[i, j, :], color=colors[0])
             if obs_noise is not None:
-                axs[j].scatter(path_t_obs, path_O_obs, label=lab3,
+                axs[j].scatter(path_t_obs, path_O_obs,
+                               # label=lab3,
                                color=colors[0])
                 # axs[j].scatter(recr_t, recr_X[i, :, j],label='observed recr.',
                 #                color="black", marker="x")
@@ -1568,9 +1659,8 @@ def plot_one_path_with_pred(
                 facecolors = colors[0]
                 if input_coords is not None and j not in input_coords:
                     facecolors = 'none'
-                    lab3 = '(un)observed'
                     unobserved_coord = True
-                axs[j].scatter(path_t_obs, path_X_obs, label=lab3,
+                axs[j].scatter(path_t_obs, path_X_obs,
                                color=colors[0], facecolors=facecolors)
             if j in output_coords:
                 if loss_quantiles is not None:
@@ -1582,7 +1672,7 @@ def plot_one_path_with_pred(
                                   [2*min(q, 1-q)])
                 else:
                     axs[j].plot(path_t_pred, path_y_pred[:, i, outcoord_ind],
-                                label=lab1, color=colors[1])
+                                color=colors[1])
                 if plot_variance:
                     axs[j].fill_between(
                         path_t_pred,
@@ -1602,7 +1692,7 @@ def plot_one_path_with_pred(
                                       [2*min(q, 1-q)])
                     else:
                         axs[j].plot(path_t_true, path_y_true[:,i,outcoord_ind],
-                                    label=lab2, linestyle=':', color=colors[2])
+                                    linestyle=':', color=colors[2])
                     if plot_variance and path_var_true is not None:
                         axs[j].fill_between(
                             path_t_true,
@@ -1656,18 +1746,31 @@ def plot_one_path_with_pred(
                     high = max(high, np.max(true_X[i]+obs_noise[i]))
                 eps = (high - low)*0.05
                 axs[j].set_ylim([low-eps, high+eps])
+        if plot_vola:
+            for j in range(model.var_size):
+                axs[dim + j].plot(
+                    path_t_pred, path_var_pred[:, i, j],
+                    color=colors[1])
+                if use_cond_exp and path_var_true is not None:
+                    axs[dim + j].plot(
+                        path_t_true, path_var_true[:, i, j],
+                        linestyle=':', color=colors[2])
+                axs[dim + j].set_ylabel(f"(vola coord {j})")
 
+        # create legend
+        h0, = axs[-1].plot([], [], color=colors[0], label=lab0, )
         if unobserved_coord:
-            handles, labels = axs[-1].get_legend_handles_labels()
-            l, = axs[-1].plot(
-                [], [], color=colors[0], label='(un)observed',
+            h1, = axs[-1].plot(
+                [], [], color=colors[0], label="unobserved/observed",
                 linestyle='none', marker="o", fillstyle="right")
-
-            handles[-1] = l
-            labels[-1] = 'unobserved/observed'
-            axs[-1].legend(handles, labels)
         else:
-            axs[-1].legend()
+            h1, = axs[-1].plot(
+                [], [], color=colors[0], label="observed",
+                linestyle='none', marker="o", fillstyle="right")
+        if loss_quantiles is None:
+            h2, = axs[-1].plot([], [], color=colors[1], label=lab1,)
+            h3 = axs[-1].plot([], [], color=colors[2], label=lab2, linestyle=':')
+        axs[-1].legend()
         plt.xlabel('$t$')
         save = os.path.join(save_path, filename.format(i))
         plt.savefig(save, **save_extras)

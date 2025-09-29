@@ -291,7 +291,7 @@ def train(
         makedirs(saved_models_path)
         if not os.path.exists(model_overview_file_name):
             df_overview = pd.DataFrame(
-                data=None, columns=['id', 'description'])
+                data=None, columns=['id', 'description'], dtype=object)
             max_id = 0
         else:
             df_overview = pd.read_csv(model_overview_file_name, index_col=0)
@@ -363,7 +363,7 @@ def train(
             resume_training = False
     if not resume_training:
         initial_print += '\ninitiate new model ...'
-        df_metric = pd.DataFrame(columns=metr_columns)
+        df_metric = pd.DataFrame(columns=metr_columns, dtype=object)
 
     # ---------------- plot/eval only ---------------
     plot_only = False

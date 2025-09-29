@@ -48,7 +48,7 @@ def get_dataset_overview(training_data_path=training_data_path):
     makedirs(training_data_path)
     if not os.path.exists(data_overview):
         df_overview = pd.DataFrame(
-            data=None, columns=['name', 'id', 'description'])
+            data=None, columns=['name', 'id', 'description'], dtype=object)
     else:
         df_overview = pd.read_csv(data_overview, index_col=0)
     return df_overview, data_overview
@@ -62,37 +62,57 @@ def create_dataset(
     create a synthetic dataset using one of the stock-models
     :param stock_model_name: str, name of the stockmodel, see _STOCK_MODELS
     :param hyperparam_dict: dict, contains all needed parameters for the model
-            it can also contain additional options for dataset generation:
-                - masked    None, float or array of floats. if None: no mask is
-                            used; if float: lambda of the poisson distribution;
-                            if array of floats: gives the bernoulli probability
-                            for each coordinate to be observed
-                - timelag_in_dt_steps   None or int. if None: no timelag used;
-                            if int: number of (dt) steps by which the 1st
-                            coordinate is shifted to generate the 2nd coord.,
-                            this is used to generate mask accordingly (such that
-                            second coord. is observed whenever the information
-                            is already known from first coord.)
-                - timelag_shift1    bool, if True: observe the second coord.
-                            additionally only at one step after the observation
-                            times of the first coord. with the given prob., if
-                            False: observe the second coord. additionally at all
-                            times within timelag_in_dt_steps after observation
-                            times of first coordinate, at each time with given
-                            probability (in masked); default: True
-                - X_dependent_observation_prob   not given or str, if given:
-                            string that can be evaluated to a function that is
-                            applied to the generated paths to get the
-                            observation probability for each coordinate
-                - obs_scheme   dict, if given: specifies the observation scheme
-                - obs_noise    dict, if given: add noise to the observations
-                            the dict needs the following keys: 'distribution'
-                            (defining the distribution of the noise), and keys
-                            for the parameters of the distribution (depending on
-                            the used distribution); supported distributions
-                            {'normal'}. Be aware that the noise needs to be
-                            centered for the model to be able to learn the
-                            correct dynamics.
+        it can also contain additional options for dataset generation:
+        - masked    None, float or array of floats. if None: no mask is
+                    used; if float: lambda of the poisson distribution;
+                    if array of floats: gives the bernoulli probability
+                    for each coordinate to be observed
+        - timelag_in_dt_steps   None or int. if None: no timelag used;
+                    if int: number of (dt) steps by which the 1st
+                    coordinate is shifted to generate the 2nd coord.,
+                    this is used to generate mask accordingly (such that
+                    second coord. is observed whenever the information
+                    is already known from first coord.)
+        - timelag_shift1    bool, if True: observe the second coord.
+                    additionally only at one step after the observation
+                    times of the first coord. with the given prob., if
+                    False: observe the second coord. additionally at all
+                    times within timelag_in_dt_steps after observation
+                    times of first coordinate, at each time with given
+                    probability (in masked); default: True
+        - X_dependent_observation_prob   not given or str, if given:
+                    string that can be evaluated to a function that is
+                    applied to the generated paths to get the
+                    observation probability for each coordinate
+        - obs_scheme   dict, if given: specifies the observation scheme
+        - obs_noise    dict, if given: add noise to the observations
+                    the dict needs the following keys: 'distribution'
+                    (defining the distribution of the noise), and keys
+                    for the parameters of the distribution (depending on
+                    the used distribution); supported distributions
+                    {'normal'}. Be aware that the noise needs to be
+                    centered for the model to be able to learn the
+                    correct dynamics.
+        - special_dataset_features   bool or str (in options), default: False,
+                if one of the options: add special features to the stock
+                paths of the dataset (see below for options). features are added
+                as additional coordinates to the paths, where the original data
+                is last.
+                options:
+                - "X_inc": add the increments of X as additional coordinates
+                - "Z": add the Z^+ and Z^- processes as additional coordinates,
+                    where Z_t = (X_t - X_{tau})^2 and Z^+ is set to 0 at
+                    observation times (i.e. the right limit of Z)
+                - "QV": add the QV^+ and QV^- processes as additional
+                    coordinates, where
+                    QV_t = \sum_{tau <= s <= t} (X_s - X_{s-dt})^2 and
+                    QV^+ is set to 0 at observation times (i.e. the right
+                    limit of QV)
+        - divide_by_t   bool, default: False, whether the increments should be
+                divided by the time increment (or its square root) when
+                computing special dataset features. applicable only for
+                special_dataset_features in {"X_inc", "Z"}.
+
 
     :param seed: int, random seed for the generation of the dataset
     :return: str (path where the dataset is saved), int (time_id to identify
@@ -219,6 +239,70 @@ def create_dataset(
                 obs_noise_dict["distribution"]))
     else:
         obs_noise = None
+
+    # compute and add special datasets features to the dataset paths
+    special_dataset_features = False
+    if "special_dataset_features" in hyperparam_dict:
+        special_dataset_features = hyperparam_dict["special_dataset_features"]
+    divide_by_t = False
+    if "divide_by_t" in hyperparam_dict:
+        divide_by_t = hyperparam_dict["divide_by_t"]
+    if special_dataset_features:
+        dim = size[1]
+        nb_paths = size[0]
+        time_steps = size[2]
+        Z_minus = np.zeros((nb_paths, dim, dim, time_steps))
+        Z_plus = np.zeros((nb_paths, dim, dim, time_steps))
+        X_inc = np.zeros((nb_paths, dim, time_steps))
+        QV_minus = np.zeros((nb_paths, dim, dim, time_steps))
+        QV_plus = np.zeros((nb_paths, dim, dim, time_steps))
+        last_stock_obs = stock_paths[:, :, 0].copy()
+        last_obs_time = np.zeros((nb_paths, dim))
+        for t in range(1, time_steps):
+            curr_t = t * dt
+            t_diff = curr_t - last_obs_time
+            diff = copy.deepcopy((stock_paths[:, :, t] - last_stock_obs))
+            diffQV = copy.deepcopy(
+                (stock_paths[:, :, t] - stock_paths[:, :, t - 1]))
+            diffQV = diffQV[:, :, np.newaxis]
+            diffQV = np.matmul(diffQV, diffQV.transpose(0, 2, 1))
+            if divide_by_t:
+                diff1 = diff / t_diff
+                diff2 = diff / np.sqrt(t_diff)
+            else:
+                diff1 = diff
+                diff2 = diff
+            diff2 = diff2[:, :, np.newaxis]
+            X_inc[:, :, t] = diff1
+            Z_minus[:, :, :, t] = np.matmul(diff2, diff2.transpose(0, 2, 1))
+            Z_plus[:, :, :, t] = Z_minus[:, :, :, t]
+            QV_minus[:, :, :, t] = QV_plus[:, :, :, t - 1] + diffQV
+            QV_plus[:, :, :, t] = QV_minus[:, :, :, t]
+            if masked:
+                raise NotImplementedError(
+                    "masked increments features not implemented")
+                # TODO: this doesn't work correctly in a masked case
+            where_obs = observed_dates[:, t] == 1
+            last_stock_obs[where_obs] = stock_paths[where_obs, :, t]
+            Z_plus[where_obs, :, :, t] = 0
+            last_obs_time[where_obs] = curr_t
+            QV_plus[where_obs, :, :, t] = 0
+        Z_minus_flattened = Z_minus.reshape(nb_paths, dim * dim, time_steps)
+        Z_plus_flattened = Z_plus.reshape(nb_paths, dim * dim, time_steps)
+        QV_minus_flattened = QV_minus.reshape(nb_paths, dim * dim, time_steps)
+        QV_plus_flattened = QV_plus.reshape(nb_paths, dim * dim, time_steps)
+        if special_dataset_features in [
+            "Xinc", "X_inc", "X_increments", "increments", "X_inc_n_Z"]:
+            print("use special dataset feature: X increments")
+            stock_paths = np.concatenate([X_inc, stock_paths], axis=1)
+        if special_dataset_features in ["Z", "Z_process", "Z_inc", "X_inc_n_Z"]:
+            print("use special dataset feature: Z process")
+            stock_paths = np.concatenate(
+                [Z_plus_flattened, Z_minus_flattened, stock_paths], axis=1)
+        if special_dataset_features in ["QV", "QV_process"]:
+            print("use special dataset feature: QV process")
+            stock_paths = np.concatenate(
+                [QV_plus_flattened, QV_minus_flattened, stock_paths], axis=1)
 
     # time_id = int(time.time())
     time_id = 1
@@ -829,7 +913,7 @@ def CustomCollateFnGen(func_names=None):
                     if observed_dates[i, t] == 1:
                         counter += 1
                         # here axis=0, since only 1 dim (the data_dimension),
-                        #    i.e. the batch-dim is cummulated outside together
+                        #    i.e. the batch-dim is cumulated outside together
                         #    with the time dimension
                         sp = stock_paths[i, :, t]
                         if obs_noise is not None:
@@ -989,16 +1073,20 @@ def main(arg):
     function to generate datasets
     """
     del arg
-    if FLAGS.dataset_name:
-        dataset_name = FLAGS.dataset_name
-        print('dataset_name: {}'.format(dataset_name))
-    else:
-        raise ValueError("Please provide --dataset_name")
     if FLAGS.dataset_params:
         dataset_params = eval("config."+FLAGS.dataset_params)
         print('dataset_params: {}'.format(dataset_params))
     else:
         raise ValueError("Please provide --dataset_params")
+    if FLAGS.dataset_name:
+        dataset_name = FLAGS.dataset_name
+        print('dataset_name: {}'.format(dataset_name))
+    elif "model_name" in dataset_params:
+        dataset_name = dataset_params["model_name"]
+        print('dataset_name (from dataset_params): {}'.format(dataset_name))
+    else:
+        raise ValueError("Please provide --dataset_name")
+
     if "combined_" in dataset_name:
         smn = dataset_name.split("_")[1:]
         create_combined_dataset(

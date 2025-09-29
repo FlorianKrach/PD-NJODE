@@ -45,7 +45,7 @@ def get_dataset_overview(training_data_path=training_data_path):
     makedirs(training_data_path)
     if not os.path.exists(data_overview):
         df_overview = pd.DataFrame(
-            data=None, columns=['name', 'id', 'description'])
+            data=None, columns=['name', 'id', 'description'], dtype=object)
     else:
         df_overview = pd.read_csv(data_overview, index_col=0)
     return df_overview, data_overview

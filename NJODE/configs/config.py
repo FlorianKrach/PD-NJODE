@@ -11,6 +11,7 @@ from configs.config_ODE import *
 from configs.config_ParamFilter import *
 from configs.config_Quantiles import *
 from configs.config_uncertainty import *
+from configs.config_GenNJODE import *
 
 import numpy as np
 import socket

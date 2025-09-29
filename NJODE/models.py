@@ -3,6 +3,7 @@ authors: Florian Krach & Marc Nuebel & Calypso Herrera
 
 implementation of the model for NJ-ODE
 """
+import copy
 
 # =====================================================================================================================
 import torch
@@ -11,6 +12,7 @@ import os
 import iisignature as sig
 import sklearn
 import scipy.linalg
+import pandas as pd
 
 from loss_functions import LOSS_FUN_DICT
 
@@ -418,6 +420,7 @@ class NJODE(torch.nn.Module):
         self.var_weight = 1.
         self.which_var_loss = None
 
+        self.started_generation = False
 
         # get options from the options of train input
         options1 = options['options']
@@ -730,6 +733,7 @@ class NJODE(torch.nn.Module):
         last_X = start_X
         batch_size = start_X.size()[0]
         data_dim = start_X.size()[1]
+        last_obs_time = np.zeros((batch_size,))
         if dim_to is None:
             dim_to = len(self.output_coords)
         out_coords = self.output_coords[:dim_to]
@@ -744,7 +748,6 @@ class NJODE(torch.nn.Module):
                 "use_y_for_ode can only be used when imputation is possible, "
                 "i.e., when input and output coordinates are the same")
 
-
         if self.coord_wise_tau:
             tau = torch.tensor([[0.0]]).repeat(batch_size, self.input_size).to(
                 self.device)
@@ -758,18 +761,16 @@ class NJODE(torch.nn.Module):
         if (self.input_sig or self.use_sig_for_classifier):
             if X.shape[0] == 0:  # if no data, set signature to 0
                 pass
-            elif self.masked:
-                Mdc = M.clone()
-                Mdc[Mdc==0] = np.nan
-                X_obs_impute = X * Mdc
+            else:
+                if self.masked:
+                    Mdc = M.clone()
+                    Mdc[Mdc==0] = np.nan
+                    X_obs_impute = X * Mdc
+                else:
+                    X_obs_impute = X
                 signature = self.get_signature(
                     times=times, time_ptr=time_ptr,
                     X=X_obs_impute[:, self.signature_coords],
-                    obs_idx=obs_idx, start_X=start_X[:, self.signature_coords])
-            else:
-                signature = self.get_signature(
-                    times=times, time_ptr=time_ptr,
-                    X=X[:, self.signature_coords],
                     obs_idx=obs_idx, start_X=start_X[:, self.signature_coords])
 
             # in beginning, no path was observed => set sig to 0
@@ -937,7 +938,8 @@ class NJODE(torch.nn.Module):
                     compute_variance=compute_variance,
                     var_weight=self.var_weight,
                     Y_var_bj=Y_var_bj, Y_var=Y_var, dim_to=dim_to,
-                    which_var_loss=self.which_var_loss)
+                    which_var_loss=self.which_var_loss,
+                    tdiff=obs_time-last_obs_time[i_obs.long()],)
 
             # make update of last_X and tau, that is not inplace 
             #    (otherwise problems in autograd)
@@ -956,6 +958,7 @@ class NJODE(torch.nn.Module):
                     temp_tau[i_obs.long()] = obs_time.astype(np.float64)
                 last_X = temp_X
                 tau = temp_tau
+                last_obs_time[i_obs.long()] = obs_time.astype(np.float64)
 
             if return_path:
                 path_t.append(obs_time)
@@ -1071,19 +1074,58 @@ class NJODE(torch.nn.Module):
             times, time_ptr, X, obs_idx, delta_t, T, start_X, None,
             return_path=True, get_loss=False, until_T=True, M=M,
             start_M=start_M, dim_to=output_dim_to)
+        if self.which_loss in ["vola", "vola_lim"]:
+            # in this case, the main output is used to predict the vola,
+            #   therefore we square it (via matmul) and flatten the result
+            d2 = path_y.shape[2]
+            d = int(np.sqrt(d2))
+            path_y = path_y.view(path_y.shape[0], path_y.shape[1], d, d)
+            path_y = torch.matmul(path_y.transpose(2, 3), path_y)
+            path_y = path_y.view(path_y.shape[0], path_y.shape[1], d2)
+        if self.which_loss in ["gen_coeffs"]:
+            # in this case, the main output is used to predict the drift and the
+            #   var output is used to predict the vola. therefore, we square the
+            #   var output (via matmul) and flatten it
+            d2 = path_var.shape[2]
+            d = int(np.sqrt(d2))
+            path_var = path_var.view(path_var.shape[0], path_var.shape[1], d, d)
+            path_var = torch.matmul(path_var.transpose(2, 3), path_var)
+            path_var = path_var.view(path_var.shape[0], path_var.shape[1], d2)
 
         if true_paths is None:
             if M is not None:
                 M = M.detach().cpu().numpy()[:, :dim_to]
             if X.shape[0] > 0:  # if no data (eg. bc. obs_perc=0, not possible)
                 X = X.detach().cpu().numpy()[:, :dim_to]
-            _, true_path_t, true_path_y = stockmodel.compute_cond_exp(
+            res_sm = stockmodel.compute_cond_exp(
                 times, time_ptr, X,
                 obs_idx.detach().cpu().numpy(),
                 delta_t, T, start_X.detach().cpu().numpy()[:, :dim_to],
                 n_obs_ot.detach().cpu().numpy(),
                 return_path=True, get_loss=False, M=M,
-                store_and_use_stored=use_stored_cond_exp)
+                store_and_use_stored=use_stored_cond_exp,
+                return_var=stockmodel.return_var_implemented)
+            if stockmodel.return_var_implemented:
+                _, true_path_t, true_path_y, true_path_var = res_sm
+            else:
+                _, true_path_t, true_path_y = res_sm
+            if self.which_loss in ["vola", "vola_lim"]:
+                # in this case, also square the stockmodel output
+                true_path_y = true_path_y.reshape(
+                    true_path_y.shape[0], true_path_y.shape[1], d, d)
+                true_path_y = np.matmul(
+                    true_path_y.transpose(0, 1, 3, 2), true_path_y)
+                true_path_y = true_path_y.reshape(
+                    true_path_y.shape[0], true_path_y.shape[1], d2)
+            if self.which_loss in [
+                "gen_coeffs"] and stockmodel.return_var_implemented:
+                # in this case, also square the stockmodel var output
+                true_path_var = true_path_var.reshape(
+                    true_path_var.shape[0], true_path_var.shape[1], d, d)
+                true_path_var = np.matmul(
+                    true_path_var.transpose(0, 1, 3, 2), true_path_var)
+                true_path_var = true_path_var.reshape(
+                    true_path_var.shape[0], true_path_var.shape[1], d2)
         else:
             true_t = np.linspace(0, T, true_paths.shape[2])
             which_t_ind = []
@@ -1098,6 +1140,15 @@ class NJODE(torch.nn.Module):
 
         if path_y.detach().cpu().numpy().shape == true_path_y.shape:
             eval_metric = diff_fun(path_y.detach().cpu().numpy(), true_path_y)
+            if stockmodel.return_var_implemented and path_var is not None:
+                if path_var.detach().cpu().numpy().shape == true_path_var.shape:
+                    eval_metric_var = diff_fun(
+                        path_var.detach().numpy(), true_path_var)
+                    eval_metric = np.array([eval_metric, eval_metric_var])
+                else:
+                    print(path_var.detach().numpy().shape)
+                    print(true_path_var.shape)
+                    raise ValueError("Shapes do not match!")
         else:
             print(path_y.detach().cpu().numpy().shape)
             print(true_path_y.shape)
@@ -1106,6 +1157,267 @@ class NJODE(torch.nn.Module):
             return eval_metric, path_t, true_path_t, path_y, true_path_y
         else:
             return eval_metric
+
+
+    def generative_step(
+        self, delta_t, next_T, batch_size,
+        start_X=None, init_times=None, init_X=None, start_M=None, init_M=None,
+        next_X=None, next_obs_time=None, paths=None):
+        """
+        Args:
+            start_X: None or np.array of dim (inner_dim,)
+            init_times: None or np.array of dim (timesteps,)
+            init_X: None or np.array of dim (timesteps, inner_dim)
+            batch_size: int, the batch size to produce
+            delta_T: float, the time steps between each step, should coincide
+                with delta_t from model training
+            next_T: float, the next time at which to return the model prediction
+            start_M: None or np.array of dim (inner_dim,)
+            init_M: None or np.array of dim (timesteps, inner_dim)
+            next_X: None or np.array of dim (batchsize, inner_dim), the value of
+                the next observation
+            next_obs_time: None or float, the time of the next observation
+                next_X
+            paths: None or np.array of dim (batchsize, timesteps, inner_dim),
+                used to compute the signature of the path up to the current time
+
+            the args start_X, init_times, init_X (and start_M, init_M) need only
+            be provided when restarting generation. in this case, they are not
+            provided batch wise, but only one initial sample path is used, which
+            is transformed to the correct batch_size (by repetition). in
+            particular, all generated samples will start from the same initial
+            sample path.
+
+            the args next_X and next_obs_time need only be provided when
+            continueing the generation. they need to be provided in a batchwise
+            form.
+
+        Returns:
+            the model output/prediction at next_T
+
+        """
+        c_sig = None
+
+        if not self.started_generation:
+            # --- preprocess the provided initial starting sequence ---
+            self.started_generation = True
+            if len(init_times) > 0:
+                assert len(init_times) == len(init_X)
+            start_X = torch.tensor(
+                start_X, dtype=torch.float32).unsqueeze(0).repeat(batch_size, 1)
+            if len(init_times) > 0:
+                X = torch.tensor(
+                    init_X, dtype=torch.float32).repeat_interleave(
+                    batch_size,dim=0)
+                if start_M is not None:
+                    start_M = torch.tensor(
+                        start_M, dtype=torch.float32).unsqueeze(0).repeat(
+                        batch_size, 1)
+                    M = torch.tensor(
+                        init_M, dtype=torch.float32).repeat_interleave(
+                        batch_size, dim=0)
+                time_ptr = np.array(
+                    [batch_size*i for i in range(len(init_times)+1)])
+
+            if self.input_sig:
+                print("WARNING: this only works if the signature only uses X "
+                      "as sig_coordinate")
+                if self.masked:
+                    init_mask = start_M.unsqueeze(1)
+                    if len(init_times) > 0:
+                        init_mask = torch.cat(
+                            (init_mask, M), dim=1)
+                    init_mask = init_mask.detach().cpu().numpy()
+                    init_mask[init_mask==0] = np.nan
+                    paths_masked = paths * init_mask
+                    df = pd.DataFrame(paths_masked)
+                    df.fillna(method='ffill', axis=1, inplace=True)
+                    self.paths_ff = df.as_matrix()
+                else:
+                    self.paths_ff = paths
+                self.sigtimes = np.array([0] + list(init_times))
+                sigtimes = self.sigtimes.reshape(1, -1, 1).repeat(batch_size, axis=0)
+                paths_ff_t = np.concatenate(
+                    [sigtimes, self.paths_ff], axis=2)
+                signature = sig.sig(paths_ff_t, self.level, 2)
+                current_sig = np.zeros((batch_size, self.sig_depth))
+                c_sig = torch.from_numpy(current_sig).float().to(self.device)
+
+            # --- process the initial starting sequence ---
+            self.last_X = start_X
+            self.data_dim = start_X.size()[1]
+            out_coords = self.output_coords
+            self.impute = False
+            if (len(self.input_coords) == len(self.output_coords) and
+                np.all(self.input_coords == self.output_coords) and
+                self.loss_quantiles is None):
+                self.impute = True
+            if not self.impute and self.use_y_for_ode:
+                raise ValueError(
+                    "use_y_for_ode can only be used when imputation is possible, "
+                    "i.e., when input and output coordinates are the same")
+            if self.coord_wise_tau:
+                self.tau = torch.tensor([[0.0]]).repeat(batch_size,
+                                                   self.input_size).to(
+                    self.device)
+            else:
+                self.tau = torch.tensor([[0.0]]).repeat(batch_size, 1).to(
+                    self.device)
+            self.current_time = 0.0
+            if self.masked:
+                if start_M is None:
+                    start_M = torch.ones_like(start_X)
+                    start_M = start_M[:, self.input_coords]
+            else:
+                start_M = None
+
+            # initialize h
+            self.h = self.encoder_map(
+                start_X[:, self.input_coords], mask=start_M,
+                sig=c_sig,
+                h=torch.zeros((batch_size, self.hidden_size)).to(self.device),
+                t=torch.cat((self.tau, self.current_time - self.tau),
+                            dim=1).to(self.device))
+
+            # if init_times is empty, then this is skipped, otherwise propagate
+            #   through all init observations
+            for i, obs_time in enumerate(init_times):
+                # Propagation of the ODE until next observation
+                self.generative_step_ode_prop(
+                    obs_time=obs_time, delta_t=delta_t, c_sig=c_sig)
+
+                # Reached an observation - update
+                start = time_ptr[i]
+                end = time_ptr[i + 1]
+                X_obs = X[start:end]
+                if self.masked:
+                    M_obs = M[start:end]
+                    M_obs_in = M_obs[:, self.input_coords]
+                else:
+                    M_obs_in = None
+                if self.input_sig:
+                    current_sig = signature[:, i]
+                    c_sig = torch.from_numpy(current_sig).float().to(
+                        self.device)
+                self.generative_step_rnn(
+                    X_obs=X_obs, M_obs_in=M_obs_in, obs_time=obs_time,
+                    c_sig=c_sig)
+
+            # --- now self.h is at the state of last observation ---
+
+        else:
+            # --- process the provided new observation ---
+            # propagate ODE until next obs
+            self.generative_step_ode_prop(
+                obs_time=next_obs_time, delta_t=delta_t, c_sig=c_sig)
+
+            # Reached an observation - update
+            if isinstance(next_X, np.ndarray):
+                next_X = torch.tensor(next_X, dtype=torch.float32)
+            if self.masked:
+                M_obs = torch.ones_like(next_X)
+                M_obs_in = M_obs[:, self.input_coords]
+            else:
+                M_obs_in = None
+            if self.input_sig:
+                self.sigtimes = np.concatenate(
+                    [self.sigtimes, np.array([next_obs_time])])
+                sigtimes = self.sigtimes.reshape(1, -1, 1).repeat(
+                    batch_size, axis=0)
+                paths_ff = np.concatenate(
+                    [self.paths_ff, paths[:,self.paths_ff.shape[1]:,:]],
+                    axis=1)
+                paths_ff_t = np.concatenate(
+                    [sigtimes, paths_ff], axis=2)
+                current_sig = sig.sig(paths_ff_t, self.level, 0)
+                c_sig = torch.from_numpy(current_sig).float().to(self.device)
+            self.generative_step_rnn(
+                X_obs=next_X, M_obs_in=M_obs_in, obs_time=next_obs_time,
+                c_sig=c_sig)
+
+            # --- now self.h is at the state of the new observation ---
+
+        # --- after processing the initial or new obs, predict until next_T ---
+        h = self.h.clone()
+        current_time = copy.deepcopy(self.current_time)
+        self.generative_step_ode_prop(
+            obs_time=next_T, delta_t=delta_t, c_sig=c_sig)
+        Y = self.readout_map(self.h).detach()
+        if self.var_size > 0:
+            y = Y[:, :-self.var_size]
+            var_y = Y[:, -self.var_size:]
+        else:
+            y = Y
+            var_y = None
+
+        # reset values of h and current_time to the state at last obs (for
+        #   consistency in case the propagation was further then next obs time
+        #   will be)
+        self.h = h
+        self.current_time = current_time
+
+        return y, var_y
+
+    def generative_step_ode_prop(self, obs_time, delta_t, c_sig):
+        while self.current_time < (obs_time - 1e-10 * delta_t):  # 0.0001 delta_t used for numerical consistency.
+            if self.current_time < obs_time - delta_t:
+                delta_t_ = delta_t
+            else:
+                delta_t_ = obs_time - self.current_time
+            if self.solver == 'euler':
+                self.h, self.current_time = self.ode_step(
+                    self.h, delta_t_, self.current_time,
+                    last_X=self.last_X[:, self.input_coords],
+                    tau=self.tau,
+                    signature=c_sig, current_y=self.readout_map(self.h))
+            else:
+                raise NotImplementedError
+
+    def generative_step_rnn(self, X_obs, M_obs_in, obs_time, c_sig=None):
+        # Using RNNCell to update h. Also updating tau and last_X
+        Y_bj = self.readout_map(self.h)
+        X_obs_impute = X_obs
+        if self.masked:
+            if self.impute:
+                # self imputation only possible if input and output are
+                #    the same and no quantile loss is used
+                X_obs_impute = X_obs * M_obs_in + (torch.ones_like(
+                    M_obs_in.long()) - M_obs_in) * Y_bj[:, :self.data_dim]
+            else:
+                # otherwise set all masked entries to last value of X
+                X_obs_impute = X_obs * M_obs_in + (1 - M_obs_in) * self.last_X
+        c_sig_iobs = c_sig
+        temp = self.encoder_map(
+            X_obs_impute[:, self.input_coords],
+            mask=M_obs_in, sig=c_sig_iobs, h=self.h,
+            t=torch.cat((self.tau, self.current_time - self.tau), dim=1))
+        self.h = temp
+
+        # make update of last_X and tau
+        temp_tau = self.tau.clone()
+        if self.use_y_for_ode:
+            Y = self.readout_map(self.h)
+            temp_X = Y[:, :self.data_dim]
+        else:
+            temp_X = X_obs_impute
+        if self.coord_wise_tau:
+            _M = M_obs_in
+            temp_tau[_M == 1] = obs_time
+        else:
+            temp_tau[:] = obs_time
+        self.last_X = temp_X
+        self.tau = temp_tau
+
+    def restart_generation(self):
+        self.started_generation = False
+        self.tau = None
+        self.last_X = None
+        self.h = None
+        self.current_time = None
+        self.impute = None
+        self.sigtimes = None
+        self.paths_ff = None
+
 
     def evaluate_LOB(
             self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
