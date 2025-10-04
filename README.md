@@ -7,7 +7,7 @@ This repository is the official implementation of the papers
 - [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
 - [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
 - [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271)
-- [Neural Jump ODEs as Generative Models](?)
+- [Neural Jump ODEs as Generative Models](?TODO)
 
 which are part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -26,7 +26,7 @@ The experiments from the follow-up papers can be run with:
 
 A notebook studying Explainability in the context of NJODEs is available at [Explainability of NJODEs](https://gist.github.com/FlorianKrach/7a610cd88d9739b2f8bbda8455a558b4).
 
-A notebook comparing different coefficient estimation approach using the NJODE for a generative model is available at [Generative NJODE notebook](https://gist.github.com/FlorianKrach/d28a3d28e875e0cadf163b78f75028e1).
+A notebook comparing different coefficient estimation approaches using the NJODE for a generative model is available at [Generative NJODE notebook](https://gist.github.com/FlorianKrach/d28a3d28e875e0cadf163b78f75028e1).
 
 
 
