@@ -7,7 +7,7 @@ This repository is the official implementation of the papers
 - [Extending Path-Dependent NJ-ODEs to Noisy Observations and a Dependent Observation Framework](https://openreview.net/forum?id=0T2OTVCCC1) 
 - [Learning Chaotic Systems and Long-Term Predictions with Neural Jump ODEs](https://arxiv.org/abs/2407.18808)
 - [Nonparametric Filtering, Estimation and Classification using Neural Jump ODEs](https://arxiv.org/abs/2412.03271)
-- [Neural Jump ODEs as Generative Models](?TODO)
+- [Neural Jump ODEs as Generative Models](https://arxiv.org/abs/2510.02757)
 
 which are part of the series of works on Neural Jump ODEs that started with
 [Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering](https://openreview.net/forum?id=JFKR3WqwyXR).
@@ -105,6 +105,19 @@ please cite our papers:
       archivePrefix={arXiv},
       primaryClass={stat.ML},
       url={https://arxiv.org/abs/2412.03271}, 
+  }
+  ```
+  
+- [Neural Jump ODEs as Generative Models](https://arxiv.org/abs/2510.02757)
+  ```
+  @misc{crowell2025neuraljumpodesgenerative,
+      title={Neural Jump ODEs as Generative Models}, 
+      author={Robert A. Crowell and Florian Krach and Josef Teichmann},
+      year={2025},
+      eprint={2510.02757},
+      archivePrefix={arXiv},
+      primaryClass={stat.ML},
+      url={https://arxiv.org/abs/2510.02757}, 
   }
   ```
 
@@ -487,7 +500,7 @@ python run.py --params=param_list_BMandVar_U --NB_JOBS=25 --NB_CPUS=1 --first_id
 
 --------------------------------------------------------------------------------
 # Instructions for Running Experiments of Generative NJODE
-The code for the experiments of the paper [Neural Jump ODE as Generative Model](?).
+The code for the experiments of the paper [Neural Jump ODEs as Generative Models](https://arxiv.org/abs/2510.02757).
 
 The configs for these experiments are in [config_GenNJODE.py](NJODE/configs/config_GenNJODE.py).
 
