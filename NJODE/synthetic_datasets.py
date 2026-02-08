@@ -2576,6 +2576,7 @@ class BMandQuantiles(BM):
         super().__init__(nb_paths, nb_steps, maturity, dimension, **kwargs)
         assert dimension == 1
         self.quantiles = None
+        self.return_var_implemented = False
 
     def set_quantiles(self, quantiles):
         self.quantiles = quantiles
