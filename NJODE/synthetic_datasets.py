@@ -3660,6 +3660,7 @@ class BMNoisyObs(BM):
         self.path_t = None
         self.loss = None
         self.noise_sig = obs_noise["scale"]
+        self.return_var_implemented = False
 
     def compute_cond_exp(self, times, time_ptr, X, obs_idx, delta_t, T, start_X,
                          n_obs_ot, return_path=True, get_loss=False,
